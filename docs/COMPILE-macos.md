@@ -73,6 +73,19 @@ cmake --build --preset macos-arm64
 `macos-arm64` builds for the host only and is the fast option for development.
 `macos-universal` builds both architectures and is what releases use.
 
+## Running the tests
+
+`MachBug_tests` is off by default. Turn it on by re-configuring with
+`-DMACHBUG_BUILD_TESTS=ON`, build the target explicitly, then run the binary:
+
+```bash
+cd src/cross
+export QT_ROOT_DIR="$(brew --prefix qt)"
+cmake --preset macos-arm64 -DMACHBUG_BUILD_TESTS=ON
+cmake --build build/macos-arm64 --target MachBug_tests
+./build/macos-arm64/tests/MachBug_tests
+```
+
 ## Signing
 
 macOS refuses to let an unsigned binary debug anything: `task_for_pid` requires the
