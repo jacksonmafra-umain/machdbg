@@ -57,6 +57,11 @@ done
 
 # The safety net. Every file the widget library compiles must exist. This is what catches a
 # strip that reaches too far.
+#
+# The pattern only matches paths ending in a source, header, ui or resource extension. The
+# widgets_SOURCE_DIR variable is also used for bare directory references (an add_subdirectory
+# call and two target_include_directories calls) that are not files at all; matching those too
+# made this assertion fail unconditionally, on every tree, regardless of what was stripped.
 widgets_cmake=src/cross/widgets/CMakeLists.txt
 if [[ ! -f "$widgets_cmake" ]]; then
     fail "$widgets_cmake is missing"
@@ -67,12 +72,26 @@ else
         if [[ ! -f "src/gui/Src/$rel" ]]; then
             fail "widget library references missing file src/gui/Src/$rel"
         fi
-    done < <(grep -o 'widgets_SOURCE_DIR}/[^}"]*' "$widgets_cmake" | sed 's|widgets_SOURCE_DIR}/||')
-    if [[ "$referenced" -lt 80 ]]; then
-        fail "expected at least 80 referenced widget sources, found $referenced"
+    done < <(grep -oE 'widgets_SOURCE_DIR\}/[A-Za-z0-9_/.-]+\.(cpp|h|ui|qrc)' "$widgets_cmake" | sed 's|widgets_SOURCE_DIR}/||')
+    # 78 real file references are present on the vendored tree; 75 leaves a little room for
+    # upstream churn without tolerating a strip that reaches into src/gui/Src.
+    if [[ "$referenced" -lt 75 ]]; then
+        fail "expected at least 75 referenced widget sources, found $referenced"
     else
         pass "$referenced widget sources referenced and present"
     fi
+fi
+
+# A truncated or partial vendoring (an interrupted copy, a clone that ran out of disk) can still
+# leave the handful of named files above in place and report GREEN. Guard against that with a
+# floor on the total file count under src/ and cmake/. The healthy tree has roughly 1,318 files;
+# 1,200 leaves room for this task's strip and for future upstream churn without tolerating a
+# truncated copy.
+file_count=$(find src cmake -type f | wc -l | tr -d ' ')
+if [[ "$file_count" -lt 1200 ]]; then
+    fail "expected at least 1200 files under src/ and cmake/, found $file_count"
+else
+    pass "$file_count files present under src/ and cmake/"
 fi
 
 exit "$failed"
