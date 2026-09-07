@@ -1389,10 +1389,10 @@ Closes #<issue>"
 All six pull requests merged, and on a clean checkout:
 
 ```bash
-./scripts/check-toolchain.sh    # exit 0
-./scripts/verify-vendor.sh      # exit 0
-./scripts/check-credits.sh      # exit 0
-cmake --preset macos-arm64      # configures
+./scripts/check-toolchain.sh                            # exit 0
+./scripts/verify-vendor.sh                               # exit 0
+./scripts/check-credits.sh                               # exit 0
+cmake --preset macos-arm64 -DMACHBUG_BUILD_TESTS=ON      # configures
 cmake --build build/macos-arm64 --target MachBug_tests && ./build/macos-arm64/tests/MachBug_tests
 ```
 
