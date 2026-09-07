@@ -1,0 +1,3 @@
+testassert $pid != 0, "attach command line set $pid"
+testassert $hp != 0, "attach command line set $hp"
+detach

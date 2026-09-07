@@ -1,0 +1,14 @@
+settingset Events, EntryBreakpoint, 1
+init tests/membp.exe
+run
+mbreset
+mbsetstartmode 15
+bp membp:AdjacentReadSequence, ss
+run
+mbreset
+bpmrange [membp:AdjacentPointer]+0xFFFF, 2, r
+mbassertinfo [membp:AdjacentPointer]+0xFFFF, 2, r, 1, 0
+membpc [membp:AdjacentPointer]+0xFFFF
+mbassertabsent [membp:AdjacentPointer]+0xFFFF
+run
+mbassertnohit 0x64

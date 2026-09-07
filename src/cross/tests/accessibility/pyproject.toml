@@ -1,0 +1,17 @@
+[project]
+name = "x64dbg-cross-accessibility"
+version = "0.1.0"
+description = "Cross-platform xa11y end-to-end checks for the minidump tool."
+requires-python = ">=3.10"
+dependencies = [
+    "xa11y==0.11.0",
+]
+
+[tool.setuptools]
+py-modules = ["minidump_accessibility"]
+
+[project.scripts]
+x64dbg-minidump-accessibility = "minidump_accessibility:main"
+
+[tool.uv]
+package = true

@@ -1,0 +1,31 @@
+<RCC>
+    <qresource prefix="/Default">
+        <file>icons/folder-horizontal-open.png</file>
+        <file>icons/arrow-run.png</file>
+        <file>icons/control-pause.png</file>
+        <file>icons/control-stop.png</file>
+        <file>icons/arrow-restart.png</file>
+        <file>icons/arrow-step-into.png</file>
+        <file>icons/arrow-step-over.png</file>
+        <file>icons/arrow-step-rtr.png</file>
+        <file>icons/processor-cpu.png</file>
+        <file>icons/log.png</file>
+        <file>icons/breakpoint.png</file>
+        <file>icons/memory-map.png</file>
+        <file>icons/callstack.png</file>
+        <file>icons/arrow-threads.png</file>
+        <file>icons/bug.png</file>
+        <file>index.theme</file>
+    </qresource>
+    <qresource prefix="/">
+        <file>style.qss</file>
+        <file>rc/up_arrow.png</file>
+        <file>rc/down_arrow.png</file>
+        <file>rc/left_arrow.png</file>
+        <file>rc/right_arrow.png</file>
+        <file>rc/up_arrow_disabled.png</file>
+        <file>rc/down_arrow_disabled.png</file>
+        <file>rc/left_arrow_disabled.png</file>
+        <file>rc/right_arrow_disabled.png</file>
+    </qresource>
+</RCC>

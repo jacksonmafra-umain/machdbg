@@ -1,0 +1,21 @@
+settingset Events, EntryBreakpoint, 1
+init tests/membp.exe
+run
+mbreset
+mbsetstartmode 8
+bpmrange membp:CrossPageReadSequence, 1, x
+run
+mbasserthit membp:CrossPageReadSequence
+bpmc membp:CrossPageReadSequence
+mbreset
+bpmrange [membp:CrossPagePointer]+0xFFF, 1, r
+bpmrange [membp:CrossPagePointer]+0x1000, 1, r
+mbassertbpcount 2
+mbassertinfo [membp:CrossPagePointer]+0xFFF, 1, r, 1, 0
+mbassertinfo [membp:CrossPagePointer]+0x1000, 1, r, 1, 0
+run
+mbassertseq [membp:CrossPagePointer]+0xFFF
+run
+mbassertseq [membp:CrossPagePointer]+0xFFF, [membp:CrossPagePointer]+0x1000
+run
+mbassertexit 0x64

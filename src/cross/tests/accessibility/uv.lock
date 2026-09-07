@@ -1,0 +1,27 @@
+version = 1
+revision = 3
+requires-python = ">=3.10"
+
+[[package]]
+name = "x64dbg-cross-accessibility"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "xa11y" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "xa11y", specifier = "==0.11.0" }]
+
+[[package]]
+name = "xa11y"
+version = "0.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/b7/65e66b0a82ba8d9c9b862f9fb3b7fe7db6d5eac79cbd63fe5864e47c37b8/xa11y-0.11.0.tar.gz", hash = "sha256:6a1e4f78b3b4467d4aadd0fd7d47e514e2d819a22a013002ce87d4af084fdd98", size = 332643, upload-time = "2026-07-10T15:59:58.977Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4a/f4/48d94eda9148e6c3caecf5b5efcf0fdc1cbbb4e05b6c6963693d22d96ca7/xa11y-0.11.0-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:dd76d61abe782b775d754a30ef7306ee81f3a3c5197f978f4598274da536909c", size = 847226, upload-time = "2026-07-10T15:59:51.69Z" },
+    { url = "https://files.pythonhosted.org/packages/12/78/8259dedd967953dc0e523635c27b0aa671c49e57cf6ddeb5c9fd8ba8073d/xa11y-0.11.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:ce21e5da0310c1aba847730d8e85f0a66e1f0873335a78f09050f90dabd23523", size = 820330, upload-time = "2026-07-10T15:59:53.312Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/97/cc51081e8bee384bd5a35949b8cde9453da2e71da4afe69750f1f4416a48/xa11y-0.11.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:232b3af9a7c5d428f2ea75014396846b31965522ac746c9ca8a331805f71e40c", size = 2436843, upload-time = "2026-07-10T15:59:54.895Z" },
+    { url = "https://files.pythonhosted.org/packages/81/e3/cab56773d01e2c283fdb852a798ea7e15fb25790c1b10a86f2b68199dde5/xa11y-0.11.0-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f5a4d609645ca4b097a3dfe2e6506324ba97933e9bbf68af4fc6c9c240d2e646", size = 2464576, upload-time = "2026-07-10T15:59:56.329Z" },
+    { url = "https://files.pythonhosted.org/packages/58/f2/365c35fff94e6a163a240397acd018cf5a9769a854055fa77bb84db435bf/xa11y-0.11.0-cp39-abi3-win_amd64.whl", hash = "sha256:0823b179b3afa1c2f3d8ae29574f8baa001e50108f586857d8211e9957f7638a", size = 677867, upload-time = "2026-07-10T15:59:57.757Z" },
+]

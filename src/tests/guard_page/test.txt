@@ -1,0 +1,5 @@
+settingset Events, EntryBreakpoint, 0
+init tests/guard_page.exe
+run
+run
+guardpageassert

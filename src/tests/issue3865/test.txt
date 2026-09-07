@@ -1,0 +1,4 @@
+settingset Events, EntryBreakpoint, 0
+init tests/issue3865.exe
+testassert 1, "absolute -cf script executed"
+run

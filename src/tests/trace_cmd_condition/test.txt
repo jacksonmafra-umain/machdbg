@@ -1,0 +1,13 @@
+settingset Events, EntryBreakpoint, 0
+init tests/trace_cmd_condition.exe
+
+; Reproduce the command sequence of the 'Trace into...' dialog (SimpleTraceDialog):
+; log text and command text are set before the trace condition exists.
+TraceSetLog "hello: {p:cip}", ""
+TraceSetCommand "log \"hello: {p:cip}\"", ""
+testassert 1, "TraceSetCommand with an empty condition did not crash"
+
+TraceIntoConditional "dis.isbranch(cip)", .50
+testassert dis.isbranch(cip) || $tracecounter >= .50, "trace stopped on a branch or on max count"
+
+run

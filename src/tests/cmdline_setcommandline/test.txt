@@ -1,0 +1,5 @@
+settingset Events, EntryBreakpoint, 0
+init tests/cmdline_setcommandline.exe, original
+cmdlinesetup
+run
+cmdlineassert

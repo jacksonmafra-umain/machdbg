@@ -1,0 +1,33 @@
+[variables]
+LIBWOLV_ENABLE_TESTS = false
+HTTPLIB_INSTALL = false
+HTTPLIB_USE_ZSTD_IF_AVAILABLE = false
+HTTPLIB_USE_BROTLI_IF_AVAILABLE = false
+HTTPLIB_USE_ZLIB_IF_AVAILABLE = false
+HTTPLIB_USE_OPENSSL_IF_AVAILABLE = false
+
+[fetch-content.json]
+url = "https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz"
+sha256 = "42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa"
+
+[fetch-content.cpp-httplib]
+git = "https://github.com/yhirose/cpp-httplib"
+tag = "v0.25.0"
+
+[fetch-content.linux-pe]
+git = "https://github.com/can1357/linux-pe"
+tag = "1fcb057963da3d25048bf1a331cd84aab9e09c99"
+
+[fetch-content.PatternLanguage]
+git = "https://github.com/mrexodia/PatternLanguage"
+tag = "werror-fixes"
+cmake-after = """
+set_target_properties(libpl PROPERTIES
+    UNITY_BUILD ON
+)
+"""
+
+[fetch-content.udmp-parser]
+git = "https://github.com/0vercl0k/udmp-parser"
+tag = "2fff7ac40f22118cd7e68b1df71dbfd22a4906f6"
+subdir = "src"

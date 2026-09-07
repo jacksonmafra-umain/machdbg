@@ -1,0 +1,13 @@
+settingset Events, EntryBreakpoint, 1
+init tests/membp.exe
+run
+mbreset
+mbsetstartmode 6
+bpmrange membp:ExecLeaf, 1, xss
+mbassertinfo membp:ExecLeaf, 1, x, 1, 1
+run
+mbassertseq membp:ExecLeaf
+mbassertabsent membp:ExecLeaf
+run
+mbassertcount 1
+mbassertexit 0x66

@@ -1,0 +1,3 @@
+settingset Events, EntryBreakpoint, 0
+init tests/issue3803.exe
+issue3803assert

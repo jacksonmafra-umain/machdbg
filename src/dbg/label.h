@@ -1,0 +1,25 @@
+#ifndef _LABEL_H
+#define _LABEL_H
+
+#include "_global.h"
+#include "addrinfo.h"
+
+struct LABELSINFO : AddrInfo
+{
+    std::string text;
+};
+
+bool LabelSet(duint Address, const char* Text, bool Manual, bool Temp = false);
+bool LabelFromString(const char* Text, duint* Address);
+bool LabelGet(duint Address, char* Text);
+bool LabelIsTemporary(duint Address);
+bool LabelDelete(duint Address);
+void LabelDelRange(duint Start, duint End, bool Manual);
+void LabelCacheSave(JSON root);
+void LabelCacheLoad(JSON root);
+void LabelClear(bool Terminating);
+void LabelGetList(std::vector<LABELSINFO> & list);
+bool LabelGetInfo(duint Address, LABELSINFO* info);
+std::vector<std::string> LabelFindPrefix(const std::string & prefix, int maxCount, bool isCaseSensitive);
+
+#endif // _LABEL_H

@@ -1,0 +1,18 @@
+settingset Events, EntryBreakpoint, 1
+init tests/membp.exe
+run
+mbreset
+cip=membp:StartCrossPageWrite
+bpmrange membp:CrossPageWriteSequence, 1, x
+run
+mbasserthit membp:CrossPageWriteSequence
+bpmc membp:CrossPageWriteSequence
+mbreset
+bpmrange [membp:CrossPagePointer]+0xFFF, 2, w
+mbassertinfo [membp:CrossPagePointer]+0xFFF, 2, w, 1, 0
+run
+mbassertseq [membp:CrossPagePointer]+0xFFF
+run
+mbassertseq [membp:CrossPagePointer]+0xFFF, [membp:CrossPagePointer]+0xFFF
+run
+mbassertexit 0xFF
