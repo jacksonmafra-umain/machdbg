@@ -9,16 +9,24 @@ failed=0
 fail() { printf 'FAIL %s\n' "$1"; failed=1; }
 pass() { printf 'ok %s\n' "$1"; }
 
-# The pinned commit must be recorded, and it must be the one the design document names.
-if [[ ! -f docs/upstream.md ]]; then
+# The pin has one source of truth: scripts/vendor-upstream.sh. Derive it rather than hardcoding
+# it a second time, so changing the pin there cannot silently desync this check.
+pinned_commit="$(grep '^UPSTREAM_COMMIT=' scripts/vendor-upstream.sh | sed -E 's/^UPSTREAM_COMMIT="([^"]*)"/\1/')"
+
+if [[ -z "$pinned_commit" ]]; then
+    fail "scripts/vendor-upstream.sh does not define UPSTREAM_COMMIT"
+elif [[ ! -f docs/upstream.md ]]; then
     fail "docs/upstream.md is missing"
-elif ! grep -q '8794998' docs/upstream.md; then
-    fail "docs/upstream.md does not record the pinned commit 8794998"
+elif ! grep -q "$pinned_commit" docs/upstream.md; then
+    fail "docs/upstream.md does not record the pinned commit $pinned_commit"
 else
     pass "pinned commit recorded"
 fi
 
-# Files the build cannot do without.
+# Files the build cannot do without, plus the machdbg-authored surface inside the vendored
+# trees (see docs/upstream.md, "What was changed locally"). scripts/vendor-upstream.sh must
+# preserve every one of these across a re-vendor; existence alone is what a destructive
+# re-vendor would erase, so it is checked here even though it says nothing about content.
 required=(
     src/cross/cmake.toml
     src/cross/widgets/CMakeLists.txt
