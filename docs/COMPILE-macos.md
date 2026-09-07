@@ -1,0 +1,76 @@
+# Building machdbg on macOS
+
+## Requirements
+
+| Tool | Minimum | Install |
+|---|---|---|
+| Xcode command line tools | current | `xcode-select --install` |
+| CMake | 3.19 | `brew install cmake` |
+| Ninja | 1.10 | `brew install ninja` |
+| cmkr | current | [GitHub release](https://github.com/build-cpp/cmkr/releases) (`cmkr-macos.zip`); not packaged by Homebrew |
+| Capstone | 5 | `brew install capstone` |
+| Qt | 6 | Official Qt online installer |
+
+Qt does not come from Homebrew. Homebrew builds Qt for one architecture, and machdbg ships a
+universal binary for arm64 and x86-64, which needs the universal Qt from the official
+installer.
+
+Point the build at it:
+
+```bash
+export QT_ROOT_DIR="$HOME/Qt/6.9.0/macos"
+```
+
+### Homebrew Qt (arm64-only development builds)
+
+For a quick `macos-arm64` development build on Apple Silicon, `brew install qt` (Qt 6) is an
+acceptable shortcut: point `QT_ROOT_DIR` at the Homebrew prefix instead of `$HOME/Qt/...`:
+
+```bash
+export QT_ROOT_DIR="$(brew --prefix qt)"
+```
+
+This Qt is single-architecture (matching whatever CPU Homebrew built it for) and **cannot**
+satisfy the `macos-universal` preset, which links against both arm64 and x86-64 Qt libraries.
+Use the official installer whenever you need `macos-universal`, and for anything you intend to
+package or release.
+
+### cmkr
+
+`cmkr` is not a Homebrew formula. Download the `cmkr-macos.zip` asset from the
+[latest release](https://github.com/build-cpp/cmkr/releases/latest), unzip it, and place the
+`cmkr` binary somewhere on `PATH` (for example `/opt/homebrew/bin`):
+
+```bash
+mkdir -p /tmp/cmkr && cd /tmp/cmkr
+gh release download --repo build-cpp/cmkr --pattern 'cmkr-macos.zip'
+unzip cmkr-macos.zip
+chmod +x cmkr
+cp cmkr /opt/homebrew/bin/cmkr
+```
+
+## Checking the toolchain
+
+```bash
+./scripts/check-toolchain.sh
+```
+
+Every line reads `ok` when the machine is ready. A `missing` line names the tool and how to
+install it.
+
+## Building
+
+```bash
+cmake --preset macos-arm64
+cmake --build --preset macos-arm64
+```
+
+`macos-arm64` builds for the host only and is the fast option for development.
+`macos-universal` builds both architectures and is what releases use.
+
+## Signing
+
+macOS refuses to let an unsigned binary debug anything: `task_for_pid` requires the
+`com.apple.security.cs.debugger` entitlement, which is only honoured on a binary signed with an
+Apple-issued identity. Signing is therefore a build step, not a distribution step. See
+`packaging/sign.sh` once milestone 10 lands.
