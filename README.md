@@ -15,8 +15,7 @@ issues for what is planned.
 
 GPLv3, inherited from x64dbg. See [LICENSE](LICENSE).
 
-Plugins are covered by x64dbg's plugin exception and may be closed-source, commercial or
-private — unless they copy code from machdbg or x64dbg.
+Plugins are covered by x64dbg's plugin exception. Plugins may be closed-source, commercial or private, unless they copy code from machdbg or x64dbg.
 
 ## Credits
 
