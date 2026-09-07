@@ -6,7 +6,8 @@ machdbg is a vendor-and-strip fork of [x64dbg](https://github.com/x64dbg/x64dbg)
 |---|---|
 | Repository | `https://github.com/x64dbg/x64dbg.git` |
 | Branch | `development` |
-| Pinned commit | `8794998` |
+| Pinned commit (short, as set in `scripts/vendor-upstream.sh`) | `8794998` |
+| Resolved commit (full SHA, as printed by `scripts/vendor-upstream.sh` on this run) | `87949989bdeaa1d7f2960d58ef2b85b5baed7fb9` |
 | Commit date | 2026-09-06 |
 | Vendored on | 2026-09-07 |
 
