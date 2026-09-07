@@ -8,8 +8,10 @@ debug Windows PE binaries, and it is not a replacement for LLDB.
 
 ## Status
 
-Pre-alpha. Nothing is implemented yet; the design is being written. See the milestones and
-issues for what is planned.
+Milestone 0 is complete: the upstream tree is vendored, stripped and configuring under CMake,
+with the engine contract header in place. No debugger behaviour ships yet. See the milestones
+and issues for what is planned, [docs/COMPILE-macos.md](docs/COMPILE-macos.md) to build it, and
+[docs/upstream.md](docs/upstream.md) for how the vendored tree is kept in sync with x64dbg.
 
 ## Licence
 
