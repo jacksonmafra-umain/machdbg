@@ -25,8 +25,12 @@ See `scripts/strip-windows.sh` and the assertions in `scripts/verify-vendor.sh`.
 
 ## Re-syncing
 
-1. Change `UPSTREAM_COMMIT` in `scripts/vendor-upstream.sh` and in the table above.
-2. Run `./scripts/vendor-upstream.sh`. It overwrites the vendored paths.
+1. Change `UPSTREAM_COMMIT` in `scripts/vendor-upstream.sh` and update the "Pinned commit" row
+   above to the same new short SHA.
+2. Run `./scripts/vendor-upstream.sh`. It overwrites the vendored paths and, at the end of the
+   run, prints the line `done. resolved commit: <sha>`. Copy that full SHA into the "Resolved
+   commit" row above — the short pin and the full SHA must both be updated, or the table is
+   ambiguous again.
 3. Run `./scripts/strip-windows.sh` to reapply the removals.
 4. Run `./scripts/verify-vendor.sh`.
 5. Review the diff. Local changes to vendored files are overwritten by step 2, so the diff is
