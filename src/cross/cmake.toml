@@ -15,12 +15,17 @@ endif()
 [conditions]
 linux-x64 = "CMAKE_SYSTEM_NAME STREQUAL \"Linux\" AND CMAKE_SYSTEM_PROCESSOR MATCHES \"^(x86_64|amd64|AMD64)$\""
 elfbug-tests = "$<linux-x64> AND ELFBUG_BUILD_TESTS"
+macos = "CMAKE_SYSTEM_NAME STREQUAL \"Darwin\""
+macos-arm64 = "$<macos> AND CMAKE_SYSTEM_PROCESSOR MATCHES \"^(arm64|aarch64)$\""
+macos-x64 = "$<macos> AND CMAKE_SYSTEM_PROCESSOR MATCHES \"^(x86_64|amd64|AMD64)$\""
+machbug-tests = "$<macos> AND MACHBUG_BUILD_TESTS"
 
 [options]
 LIBPL_ENABLE_CLI = false
 LIBPL_ENABLE_TESTS = false
 LIBWOLV_ENABLE_TESTS = false
 ELFBUG_BUILD_TESTS = false
+MACHBUG_BUILD_TESTS = false
 
 [find-package.Threads]
 

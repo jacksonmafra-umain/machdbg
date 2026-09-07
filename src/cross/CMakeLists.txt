@@ -29,6 +29,7 @@ option(LIBPL_ENABLE_CLI "" OFF)
 option(LIBPL_ENABLE_TESTS "" OFF)
 option(LIBWOLV_ENABLE_TESTS "" OFF)
 option(ELFBUG_BUILD_TESTS "" OFF)
+option(MACHBUG_BUILD_TESTS "" OFF)
 
 project(cross
 	LANGUAGES
