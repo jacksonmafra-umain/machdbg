@@ -24,5 +24,5 @@ Built on the work of the x64dbg project: mrexodia (Duncan Ogilvie), Sigma, tr4ce
 Nukem, Herz3h, torusrxxx and the wider contributor list. The cross-platform groundwork this
 port depends on comes from @3rdit (ElfBug, cross debugger) and @eldarkg (Wine build).
 
-See [CREDITS](CREDITS.md) once it lands for the full list, including upstream dependencies and
-macOS reverse-engineering prior art.
+See [CREDITS.md](CREDITS.md) for the full list and [docs/licenses.md](docs/licenses.md) for the
+licences of everything that ships.
