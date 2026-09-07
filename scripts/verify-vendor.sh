@@ -28,6 +28,13 @@ required=(
     src/bridge/bridgemain.h
     src/dbg/_plugins.h
     cmake/cmkr.cmake
+    src/cross/MachBug/MachBug/api/machbug_api.h
+    src/cross/MachBug/tests/CMakeLists.txt
+    src/cross/MachBug/tests/api_contract.cpp
+    src/cross/MachBug/tests/api_contract_c.c
+    src/cross/MachBug/tests/cmake.toml
+    src/cross/CMakePresets.json
+    src/cross/CMakeLists.txt
 )
 for path in "${required[@]}"; do
     if [[ -e "$path" ]]; then
@@ -36,6 +43,30 @@ for path in "${required[@]}"; do
         fail "$path is missing"
     fi
 done
+
+# Existence is not enough for the three files shared with upstream: a re-vendor that overwrote
+# them with upstream's version would leave them present but silently reverted. Assert the
+# macOS-specific content a plain rm -rf + copy would destroy.
+if [[ -f src/cross/cmake.toml ]] && grep -q 'MACHBUG_BUILD_TESTS' src/cross/cmake.toml \
+    && grep -q 'machbug-tests' src/cross/cmake.toml \
+    && grep -q '\[subdir\."MachBug/tests"\]' src/cross/cmake.toml; then
+    pass "src/cross/cmake.toml carries the macOS MachBug conditions"
+else
+    fail "src/cross/cmake.toml is missing the macOS MachBug conditions (MACHBUG_BUILD_TESTS / machbug-tests / [subdir.\"MachBug/tests\"])"
+fi
+
+if [[ -f src/cross/CMakeLists.txt ]] && grep -q 'MACHBUG_BUILD_TESTS' src/cross/CMakeLists.txt \
+    && grep -q 'add_subdirectory("MachBug/tests")' src/cross/CMakeLists.txt; then
+    pass "src/cross/CMakeLists.txt carries the generated MachBug/tests subdirectory"
+else
+    fail "src/cross/CMakeLists.txt is missing the generated MachBug/tests subdirectory (regenerate from cmake.toml with cmkr)"
+fi
+
+if [[ -f cmake/cmkr.cmake ]] && grep -q 'vendor-and-strip fork (decision D3)' cmake/cmkr.cmake; then
+    pass "cmake/cmkr.cmake carries the dead submodule bootstrap removal"
+else
+    fail "cmake/cmkr.cmake is missing the dead submodule bootstrap removal (decision D3)"
+fi
 
 # Paths the strip script removes. They must not come back.
 removed=(
