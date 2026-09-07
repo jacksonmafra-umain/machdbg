@@ -23,15 +23,45 @@ this point on and are edited freely — that is the point of decision D3 in the 
 
 See `scripts/strip-windows.sh` and the assertions in `scripts/verify-vendor.sh`.
 
+## What was changed locally
+
+These paths live inside the vendored `src/` and `cmake/` trees but are machdbg's own work, not
+upstream's. `scripts/vendor-upstream.sh` treats them specially: it snapshots them before
+overwriting `src/` and `cmake/` with the fresh upstream copy, then restores them afterwards
+(`AUTHORED_PATHS` in that script), and `scripts/verify-vendor.sh` asserts both that they exist
+and, for the three files upstream also ships, that the local edit is still present.
+
+- `cmake/cmkr.cmake` — the dead submodule bootstrap upstream runs before bootstrapping cmkr
+  (`src/dbg/btparser` and a top-level `deps/` directory, neither of which exists in this tree)
+  is removed. machdbg is a vendor-and-strip fork (decision D3) that never uses submodules; left
+  in place, every configure failed immediately on the missing submodule folder. See commit
+  `7e8930d`.
+- `src/cross/cmake.toml` — carries the macOS `[conditions]` (`macos`, `macos-arm64`,
+  `macos-x64`, `machbug-tests`), the `MACHBUG_BUILD_TESTS` option, and the
+  `[subdir."MachBug/tests"]` entry.
+- `src/cross/CMakeLists.txt` — the generated file matching the `cmake.toml` edit above
+  (regenerate with `cmkr` rather than hand-editing, if `cmkr` is available).
+- `src/cross/CMakePresets.json` — the `macos-arm64` / `macos-universal` configure and build
+  presets. Upstream does not ship an equivalent file at this path.
+- `src/cross/MachBug/MachBug/api/machbug_api.h` and the four files under
+  `src/cross/MachBug/tests/` — the MachBug engine contract header and its test suite. Upstream
+  has no `MachBug` directory at all.
+
 ## Re-syncing
 
 1. Change `UPSTREAM_COMMIT` in `scripts/vendor-upstream.sh` and update the "Pinned commit" row
-   above to the same new short SHA.
-2. Run `./scripts/vendor-upstream.sh`. It overwrites the vendored paths and, at the end of the
-   run, prints the line `done. resolved commit: <sha>`. Copy that full SHA into the "Resolved
-   commit" row above — the short pin and the full SHA must both be updated, or the table is
-   ambiguous again.
+   above to the same new short SHA. `scripts/verify-vendor.sh` derives the pin from this file, so
+   nothing else needs to change for the pin itself.
+2. Commit or stash any pending changes: `scripts/vendor-upstream.sh` refuses to run against a
+   dirty tree. Run `./scripts/vendor-upstream.sh`. It overwrites the vendored paths — preserving
+   and restoring the files listed above under "What was changed locally" — and, at the end of
+   the run, prints the line `done. resolved commit: <sha>`. Copy that full SHA into the
+   "Resolved commit" row above — the short pin and the full SHA must both be updated, or the
+   table is ambiguous again.
 3. Run `./scripts/strip-windows.sh` to reapply the removals.
 4. Run `./scripts/verify-vendor.sh`.
-5. Review the diff. Local changes to vendored files are overwritten by step 2, so the diff is
-   the merge, and it is expected to be large.
+5. Review the diff. Local changes to vendored files that are *not* listed under "What was
+   changed locally" are overwritten by step 2, so the diff is the upstream merge, and it is
+   expected to be large. The files listed under "What was changed locally" are preserved across
+   the re-vendor and should not appear in the diff at all; if one does, the restore step failed
+   and needs investigating before the diff is reviewed.
