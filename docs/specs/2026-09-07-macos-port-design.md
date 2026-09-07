@@ -31,7 +31,7 @@ revisiting the sections that depend on it.
 | D2 | Independent GPLv3 fork named `machdbg` | Design freedom, no maintainer negotiation, clean trademark story | Contributing into `x64dbg/src/cross`; forking the upstream tree directly |
 | D3 | Vendor-and-strip: copy upstream at a pinned revision, delete Windows-only code outright | D2 and D5 both require editing core files freely, which a patch-set overlay forbids | Submodule + patch overlay; selective file-by-file port |
 | D4 | Universal arm64 + x86_64 from day one | Matches the definition of done; forces the honest register and breakpoint abstractions early | Apple Silicon first; Intel first |
-| D5 | Capstone for both architectures; Zydis dropped | One token model, one adapter, one dependency | Capstone for arm64 only alongside Zydis; LLVM MC; a bespoke decoder |
+| D5 | Capstone for both architectures; Zydis retired at milestone 6, not at vendor time | One token model, one adapter, one dependency — but the widget library links `zydis_wrapper` today (§4) | Capstone for arm64 only alongside Zydis; LLVM MC; a bespoke decoder |
 | D6 | Qt 6 | Qt 5.15 is end-of-life and unsupported on current macOS; official Qt 6 macOS builds are universal, Homebrew's are single-architecture | Qt 5, which D4 rules out |
 | D7 | Plugins: source-level tiers, in-process, `dlopen`-based | Lowest risk, keeps the plugin exception meaningful, gives a concrete acceptance test | Out-of-process IPC protocol; deferring plugins past v1 |
 | D8 | Ship unsigned with a signing script the user must run | Chosen by the project owner; no paid Apple Developer Program dependency | Developer ID plus notarization; self-signed with deferred notarization |
@@ -47,8 +47,10 @@ signing script before first launch.
 ```
 ┌────────────────────────────────────────────────────┐
 │ Qt 6 front-end (.app bundle)                       │
-│ widgets — Disassembly, Dump, Stack, Registers,     │
-│ MemoryMap, Threads, Symbols, Graph, Fixups         │
+│ widgets today — Disassembly, HexDump, Registers,   │
+│ table primitives, MemoryPage, Architecture         │
+│ to extract — Stack, MemoryMap, Threads, Symbols,   │
+│ Graph, Fixups                                      │
 └───────────────────────┬────────────────────────────┘
                         │ DbgAdapter (Qt signals, MemoryProvider)
 ┌───────────────────────▼────────────────────────────┐
@@ -64,6 +66,17 @@ signing script before first launch.
 ```
 
 The vtable boundary is the reserved seam from D1. Nothing above it names MachBug.
+
+The split inside the front-end box is a measured fact, not an estimate. The curated widget list
+at commit `8794998` contains `BasicView/Disassembly`, `BasicView/HexDump`, the abstract table
+views, `Gui/RegistersView`, `Memory/MemoryPage`, `Disassembler/Architecture` and the accessible
+wrappers around them. It does not contain the memory map, thread, symbol or graph views; those
+still live only in the Windows shell. The stack view exists as a Linux-side port in
+`cross/debugger/gui/CPUStack.cpp` rather than in the library.
+
+Extracting the missing views into the widget library is therefore part of this project, not a
+prerequisite someone else has finished. Milestone 5 owns the memory map and thread views,
+milestone 7 the symbol view, milestone 9 the graph.
 
 ## 4. Repository layout and build
 
@@ -86,11 +99,27 @@ machdbg/
 ```
 
 Deleted at vendor time rather than disabled with `#ifdef`: TitanEngine, GleeBug, Scylla,
-XEDParse, Zydis, DeviceNameResolver, the Windows Qt shell in `src/gui`, and the PE plugin
-loader path. Dead Windows scaffolding in a fork is merge noise with no upside.
+XEDParse, DeviceNameResolver, and the PE plugin loader path. Dead Windows scaffolding in a fork
+is merge noise with no upside.
 
-`ElfBug` is the deliberate exception. It is vendored and never built, because the engine API is
-specified as a mirror of `elfbug_api.h` and a mirror needs its original.
+Two things stay that an earlier draft of this document proposed deleting. Both were corrected
+after reading upstream at commit `8794998`.
+
+**`src/gui/Src` stays.** The widget library is not a self-contained directory. `widgets` is
+sixteen shim files of its own plus a curated list of 81 files compiled straight out of
+`src/gui/Src`, spanning `Accessible`, `BasicView`, `Disassembler`, `Gui`, `Memory`,
+`ThirdPartyLibs` and `Utils`. Deleting the Windows Qt shell destroys `x64dbg::widgets` with it.
+The upstream extraction is at an earlier stage than the project brief implies. Windows-only
+files *outside* the curated list may be removed, but only once that list has been enumerated and
+the build proves what is actually referenced.
+
+**Zydis stays until milestone 6.** `x64dbg_widgets` links `zydis_wrapper` today. The coupling is
+narrow and already named — `Disassembler/QZydis.{cpp,h}` and
+`Disassembler/ZydisTokenizer.{cpp,h}`, with `BasicView/Disassembly.{cpp,h}` as the consumer — so
+it is retired when the Capstone tokenizer arrives to replace it (§7), not at vendor time.
+
+`ElfBug` is a deliberate exception of a different kind. It is vendored and never built, because
+the engine API is specified as a mirror of `elfbug_api.h` and a mirror needs its original.
 
 Build system: cmkr (`cmake.toml`) throughout the cross tree, matching upstream, so that
 hand-merging a TOML file is the merge cost rather than hand-merging generated CMake. New
@@ -103,6 +132,11 @@ cmake --preset macos-universal && cmake --build --preset macos-universal
 
 Toolchain: `cmake`, `ninja`, `cmkr` and `capstone` from Homebrew; Qt 6 from the official online
 installer, because Homebrew's Qt is single-architecture and D4 requires universal binaries.
+
+`widgets/Qt.cmake` already resolves Qt 6 ahead of Qt 5, so D6 costs less than assumed. The
+macOS gap is in the same file: `qt_executable` passes `WIN32` to `qt_add_executable`, sets no
+`MACOSX_BUNDLE`, and has only a Windows `windeployqt` step with `macdeployqt` left as a TODO.
+No `.app` is produced until that function grows a macOS branch, which is milestone 1 work.
 
 ## 5. Engine contract
 
@@ -259,6 +293,12 @@ a shared token emitter plus a per-architecture operand walker behind `IArchOps`.
 Re-lexing Capstone's printed string was considered and rejected. It is cheaper but discards
 classification: an immediate becomes an anonymous number, a register becomes a word. Building
 from structured operands is the difference between one highlighter and two.
+
+The seam already exists upstream and is narrow: `Disassembler/QZydis.{cpp,h}` and
+`Disassembler/ZydisTokenizer.{cpp,h}`, with `BasicView/Disassembly.{cpp,h}` as the consumer and
+`Disassembler/Architecture.{cpp,h}` alongside. The work is a `QCapstone` and
+`CapstoneTokenizer` pair honouring the same interface, after which `zydis_wrapper` leaves the
+link line. That retirement is milestone 6, per D5.
 
 ### Assembler
 
@@ -512,8 +552,10 @@ Each of these gets its own issue. None blocks work before the milestone named.
    `unverified`.
 4. **Capstone version and constants** (milestone 6): confirm the AArch64 architecture constant
    against the installed header.
-5. **Qt 6 widget porting scope** (milestone 1): size the `QRegExp`, `QDesktopWidget` and
-   container API churn in the vendored widget library.
+5. **macOS bundling in `qt_executable`** (milestone 1): `Qt.cmake` already prefers Qt 6, so the
+   original question — sizing Qt 5 to Qt 6 churn — is largely answered. What remains is giving
+   `qt_executable` a macOS branch with `MACOSX_BUNDLE`, an `Info.plist`, and `macdeployqt` in
+   place of `windeployqt`.
 
 ## 14. Licensing and credits
 
@@ -539,10 +581,28 @@ leaves the tree.
 The fork carries a distinct name, so no trademark agreement with the x64dbg project is needed.
 Attribution is "based on x64dbg", never a claim to the name.
 
-## 15. Verification debt
+## 15. Verification status
 
-Written before reading the upstream tree. Every claim about `src/cross`, `elfbug_api.h`,
-`bridgemain.h` and `plugin_loader.cpp` comes from the project brief and is provisional until
-milestone 0 confirms it against the source. Apple API details are stated from documentation and
-must be checked against the installed SDK headers before use — the brief is a map, not a
-reference manual.
+This document was first written from the project brief alone. The upstream tree has since been
+read at `x64dbg/x64dbg` `development` commit `8794998`, dated 2026-09-06.
+
+Verified against the source:
+
+- `src/cross/cmake.toml` uses cmkr with a `linux-x64` condition, and gates only `ElfBug` and
+  `debugger` behind it. `minidump`, `remote_table`, `release_notes` and `hex_viewer` are
+  ungated, which is what makes milestone 1 reachable.
+- `elfbug_api.h` is 100 lines with the entry points, callback set and thread-safety comments
+  this document mirrors. Its `ElfBugRegisters` is the flat x86-64 layout §5 replaces, and it has
+  no attach entry point — only `ElfBugInit(path)`.
+- `ElfBug/tests` provides `TestHarness.h`, `SymbolHelper.h` and six target programs, the shape
+  milestone 2's harness copies.
+- `widgets/Qt.cmake` resolves Qt 6 ahead of Qt 5 and has no macOS bundling.
+
+Corrected as a result, with the original claims struck: `src/gui` is not deletable (§4), Zydis
+is not removable before milestone 6 (§4, D5), and the widget library does not yet contain the
+memory map, thread, symbol, graph or stack views (§3).
+
+Still unverified, and to be checked before the milestone that depends on each: the 272
+`BRIDGE_IMPEXP` exports and 39 `PLUG_IMPEXP` functions quoted from the brief, the internals of
+`plugin_loader.cpp`, and every Apple API detail in §6 through §9 — those are stated from
+documentation and must be checked against the installed SDK headers before use.
