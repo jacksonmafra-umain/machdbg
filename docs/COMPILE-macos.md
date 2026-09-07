@@ -90,5 +90,6 @@ cmake --build build/macos-arm64 --target MachBug_tests
 
 macOS refuses to let an unsigned binary debug anything: `task_for_pid` requires the
 `com.apple.security.cs.debugger` entitlement, which is only honoured on a binary signed with an
-Apple-issued identity. Signing is therefore a build step, not a distribution step. See
-`packaging/sign.sh` once milestone 10 lands.
+Apple-issued identity. That is a consequence for distribution, not for the build: per decision
+D8, machdbg ships unsigned, and signing is a post-install step the user runs themselves before
+first launch. See `packaging/sign.sh` once milestone 10 lands.
