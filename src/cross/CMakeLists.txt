@@ -78,6 +78,18 @@ if((CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86
 	set(CMAKE_FOLDER ${CMKR_CMAKE_FOLDER})
 
 endif()
+if((CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND MACHBUG_BUILD_TESTS) # machbug-tests
+	# Subdirectory: MachBug/tests
+	set(CMKR_CMAKE_FOLDER ${CMAKE_FOLDER})
+	if(CMAKE_FOLDER)
+		set(CMAKE_FOLDER "${CMAKE_FOLDER}/MachBug/tests")
+	else()
+		set(CMAKE_FOLDER "MachBug/tests")
+	endif()
+	add_subdirectory("MachBug/tests")
+	set(CMAKE_FOLDER ${CMKR_CMAKE_FOLDER})
+
+endif()
 # Target: minidump
 set(minidump_SOURCES
 	cmake.toml

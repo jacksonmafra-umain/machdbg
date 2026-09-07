@@ -129,3 +129,6 @@ link-libraries = [
 
 [subdir."ElfBug/tests"]
 condition = "elfbug-tests"
+
+[subdir."MachBug/tests"]
+condition = "machbug-tests"

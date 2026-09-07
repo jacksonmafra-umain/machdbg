@@ -1,0 +1,26 @@
+# Reference: https://build-cpp.github.io/cmkr/cmake-toml
+[cmake]
+version = "3.19"
+cmkr-include = false
+
+[project]
+name = "MachBug_tests"
+languages = ["C", "CXX"]
+
+[fetch-content.Catch2]
+git = "https://github.com/catchorg/Catch2"
+tag = "v3.14.0"
+shallow = true
+
+[target.MachBug_tests]
+type = "executable"
+sources = ["api_contract.cpp", "api_contract_c.c"]
+compile-features = ["cxx_std_17"]
+include-directories = ["../"]
+link-libraries = ["Catch2::Catch2WithMain"]
+properties.RUNTIME_OUTPUT_DIRECTORY = "${CMAKE_BINARY_DIR}/tests"
+cmake-after = """
+list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+include(Catch)
+catch_discover_tests(MachBug_tests)
+"""
