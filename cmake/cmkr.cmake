@@ -1,7 +1,8 @@
 include_guard()
 
-# Initialize submodule if necessary
-include(${CMAKE_CURRENT_LIST_DIR}/init-submodules.cmake)
+# Upstream bootstraps src/dbg/btparser and deps as git submodules here. machdbg is a
+# vendor-and-strip fork (decision D3): it never uses submodules, and neither path exists in
+# this tree, so that bootstrapping step is a dead reference and is not carried over.
 
 # Change these defaults to point to your infrastructure if desired
 set(CMKR_REPO "https://github.com/build-cpp/cmkr" CACHE STRING "cmkr git repository" FORCE)

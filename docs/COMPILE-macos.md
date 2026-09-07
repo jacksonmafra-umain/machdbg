@@ -60,7 +60,12 @@ install it.
 
 ## Building
 
+The presets live at `src/cross/CMakePresets.json`, not the repository root — there is no root
+`CMakeLists.txt` yet (milestone 1 introduces one, at which point these commands move to the
+repository root). Run them from `src/cross`:
+
 ```bash
+cd src/cross
 cmake --preset macos-arm64
 cmake --build --preset macos-arm64
 ```
