@@ -39,7 +39,7 @@ require_present() {
 
 require_version cmake 3.19 "cmake --version | awk 'NR==1{print \$3}'" "brew install cmake"
 require_version ninja 1.10 "ninja --version" "brew install ninja"
-require_present cmkr "brew install cmkr"
+require_present cmkr "not in Homebrew; see docs/COMPILE-macos.md"
 require_present codesign "install the Xcode command line tools: xcode-select --install"
 
 if [[ -z "${QT_ROOT_DIR:-}" ]]; then
