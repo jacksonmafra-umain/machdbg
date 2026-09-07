@@ -40,6 +40,17 @@ require_present() {
 require_version cmake 3.19 "cmake --version | awk 'NR==1{print \$3}'" "brew install cmake"
 require_version ninja 1.10 "ninja --version" "brew install ninja"
 require_present cmkr "not in Homebrew; see docs/COMPILE-macos.md"
+
+if ! capstone_version="$(pkg-config --modversion capstone 2>/dev/null)" || [[ -z "$capstone_version" ]]; then
+    printf 'missing capstone — brew install capstone\n'
+    missing=1
+elif [[ "$(printf '%s\n%s\n' "5" "$capstone_version" | sort -V | head -1)" != "5" ]]; then
+    printf 'missing capstone — found %s, need 5 or newer; brew install capstone\n' "$capstone_version"
+    missing=1
+else
+    printf 'ok capstone %s\n' "$capstone_version"
+fi
+
 require_present codesign "install the Xcode command line tools: xcode-select --install"
 
 if [[ -z "${QT_ROOT_DIR:-}" ]]; then
