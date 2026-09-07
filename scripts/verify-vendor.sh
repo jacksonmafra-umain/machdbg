@@ -37,4 +37,42 @@ for path in "${required[@]}"; do
     fi
 done
 
+# Paths the strip script removes. They must not come back.
+removed=(
+    src/dbg/TitanEngine
+    src/dbg/GleeBug
+    src/dbg/XEDParse
+    src/dbg/DeviceNameResolver
+    src/exe
+    src/launcher
+    src/loaddll
+)
+for path in "${removed[@]}"; do
+    if [[ -e "$path" ]]; then
+        fail "$path should have been stripped"
+    else
+        pass "$path stripped"
+    fi
+done
+
+# The safety net. Every file the widget library compiles must exist. This is what catches a
+# strip that reaches too far.
+widgets_cmake=src/cross/widgets/CMakeLists.txt
+if [[ ! -f "$widgets_cmake" ]]; then
+    fail "$widgets_cmake is missing"
+else
+    referenced=0
+    while read -r rel; do
+        referenced=$((referenced + 1))
+        if [[ ! -f "src/gui/Src/$rel" ]]; then
+            fail "widget library references missing file src/gui/Src/$rel"
+        fi
+    done < <(grep -o 'widgets_SOURCE_DIR}/[^}"]*' "$widgets_cmake" | sed 's|widgets_SOURCE_DIR}/||')
+    if [[ "$referenced" -lt 80 ]]; then
+        fail "expected at least 80 referenced widget sources, found $referenced"
+    else
+        pass "$referenced widget sources referenced and present"
+    fi
+fi
+
 exit "$failed"
