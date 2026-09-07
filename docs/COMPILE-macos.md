@@ -55,7 +55,7 @@ cp cmkr /opt/homebrew/bin/cmkr
 ./scripts/check-toolchain.sh
 ```
 
-Every line reads `ok` when the machine is ready. A `missing` line names the tool and how to
+Every line reads `ok` when the machine is ready. A `FAIL` line names the tool and how to
 install it.
 
 ## Building
@@ -73,9 +73,23 @@ cmake --build --preset macos-arm64
 `macos-arm64` builds for the host only and is the fast option for development.
 `macos-universal` builds both architectures and is what releases use.
 
+## Running the tests
+
+`MachBug_tests` is off by default. Turn it on by re-configuring with
+`-DMACHBUG_BUILD_TESTS=ON`, build the target explicitly, then run the binary:
+
+```bash
+cd src/cross
+export QT_ROOT_DIR="$(brew --prefix qt)"
+cmake --preset macos-arm64 -DMACHBUG_BUILD_TESTS=ON
+cmake --build build/macos-arm64 --target MachBug_tests
+./build/macos-arm64/tests/MachBug_tests
+```
+
 ## Signing
 
 macOS refuses to let an unsigned binary debug anything: `task_for_pid` requires the
 `com.apple.security.cs.debugger` entitlement, which is only honoured on a binary signed with an
-Apple-issued identity. Signing is therefore a build step, not a distribution step. See
-`packaging/sign.sh` once milestone 10 lands.
+Apple-issued identity. That is a consequence for distribution, not for the build: per decision
+D8, machdbg ships unsigned, and signing is a post-install step the user runs themselves before
+first launch. See `packaging/sign.sh` once milestone 10 lands.
