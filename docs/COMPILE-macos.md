@@ -55,7 +55,7 @@ cp cmkr /opt/homebrew/bin/cmkr
 ./scripts/check-toolchain.sh
 ```
 
-Every line reads `ok` when the machine is ready. A `missing` line names the tool and how to
+Every line reads `ok` when the machine is ready. A `FAIL` line names the tool and how to
 install it.
 
 ## Building
