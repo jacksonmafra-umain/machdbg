@@ -22,11 +22,11 @@ require_in() {
 }
 
 for name in mrexodia Sigma tr4ceflow Dreg Nukem Herz3h torusrxxx 3rdit eldarkg \
-            "Pedro Vila" StackContains DrDecode VisualPharm Fugue; do
+            "Pedro Vila" StackContains DrDecode VisualPharm Fugue GleeBug; do
     require_in CREDITS.md "$name"
 done
 
-for component in GPLv3 "Qt 6" Capstone asmjit jansson lz4 yara; do
+for component in GPLv3 "Qt 6" Capstone asmjit jansson lz4 yara Zydis; do
     require_in docs/licenses.md "$component"
 done
 

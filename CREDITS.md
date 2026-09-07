@@ -15,7 +15,7 @@ the [contributor list](https://github.com/x64dbg/x64dbg/graphs/contributors).
 
 ## Upstream dependencies
 
-TitanEngine Community Edition, Zydis, XEDParse, asmjit, Scylla, Jansson, lz4, the bug icon by
+TitanEngine Community Edition, Zydis, GleeBug, XEDParse, asmjit, Scylla, Jansson, lz4, the bug icon by
 VisualPharm, interface icons by Fugue, website by tr4ceflow.
 
 Some of these no longer ship in machdbg. They are credited because the code that grew around
