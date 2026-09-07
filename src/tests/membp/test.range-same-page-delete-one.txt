@@ -1,0 +1,16 @@
+settingset Events, EntryBreakpoint, 0
+init tests/membp.exe
+mbreset
+cip=membp:ReadThenWriteSequence
+bpmrange membp:ReadTarget, 1, r
+mbaddonhit membp:WriteTarget, 1, w
+run
+mbassertseq membp:ReadTarget
+mbassertbpcount 2
+membpc membp:ReadTarget
+mbassertbpcount 1
+cip=membp:WriteSequence
+run
+mbassertseq membp:ReadTarget, membp:WriteTarget
+run
+mbassertexit 0x5A

@@ -1,0 +1,20 @@
+settingset Events, EntryBreakpoint, 0
+varnew $callback_count, 0
+init tests/random_dll.exe
+bp LoadLibraryExW
+SetBreakpointFastResume LoadLibraryExW, 1
+SetBreakpointSilent LoadLibraryExW, 1
+SetBreakpointCondition LoadLibraryExW, 0
+SetBreakpointCommandCondition LoadLibraryExW, "strstr(utf16(rcx), \".xxl\")"
+SetBreakpointCommand LoadLibraryExW, "$log \"random_dll LoadLibraryExW hit\"; bpdll {utf16(rcx)}, a, 1; scriptcmd call onrandomdll"
+run
+run
+run
+run
+run
+randomdllassert
+ret
+
+onrandomdll:
+add $callback_count, 1
+ret

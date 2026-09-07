@@ -1,0 +1,8 @@
+settingset Events, EntryBreakpoint, 0
+init tests/cmdline_init.exe, "\"alpha\" \"beta\""
+run
+cmdlineassert
+dbsave
+init tests/cmdline_init.exe, "\"gamma\" \"delta\""
+run
+cmdlinedboverrideassert

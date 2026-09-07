@@ -1,0 +1,9 @@
+settingset Events, EntryBreakpoint, 1
+init tests/membp.exe
+run
+mbreset
+mbsetstartmode 3
+bpmrange membp:WriteTarget, 1, x
+mbassertinfo membp:WriteTarget, 1, x, 1, 0
+run
+mbassertnohit 0x5A

@@ -1,0 +1,2 @@
+init tests/issue3808.exe
+flagrepro3808

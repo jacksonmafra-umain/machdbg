@@ -1,0 +1,3 @@
+// This variant is driven entirely by driver.py: the target blocks all of its
+// threads, so a repeated pause request must fall back to a break-in thread.
+// This script is not executed.

@@ -1,0 +1,18 @@
+settingset Events, SystemBreakpoint, 1
+settingset Events, EntryBreakpoint, 0
+init tests/swbp_stale.exe
+bp swbp_stale:Ready
+run
+testassert cip == swbp_stale:Ready, "target initialized the dynamic test instruction"
+bpd swbp_stale:Ready
+bp [swbp_stale:gBreakpointAddress]
+bp swbp_stale:Finish
+run
+testassert cip == [swbp_stale:gBreakpointAddress], "dynamic short INT3 breakpoint was reached"
+bpd [swbp_stale:gBreakpointAddress]
+run
+testassert cip == swbp_stale:Finish, "all stale short INT3 events stayed inside the breakpoint engine"
+testassert dword:[swbp_stale:gEscapedBreakpoints] == 0, "no managed breakpoint exception reached the debuggee VEH"
+bpd swbp_stale:Finish
+run
+testfinalize

@@ -1,0 +1,20 @@
+[project]
+name = "x64dbg-screenreader-checks"
+version = "0.1.0"
+description = "UIA-based accessibility checks for x64dbg table views."
+requires-python = ">=3.11"
+dependencies = [
+    "comtypes>=1.4.10; sys_platform == 'win32'",
+    "pywinauto>=0.6.9",
+]
+
+[tool.setuptools]
+py-modules = ["screenreader_check", "uia_event_check", "ui_dump", "ui_common"]
+
+[project.scripts]
+x64dbg-screenreader-checks = "screenreader_check:main"
+x64dbg-screenreader-event-checks = "uia_event_check:main"
+x64dbg-ui-dump = "ui_dump:main"
+
+[tool.uv]
+package = true

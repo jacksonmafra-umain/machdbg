@@ -1,0 +1,13 @@
+settingset Events, EntryBreakpoint, 1
+init tests/membp.exe
+run
+mbreset
+mbsetstartmode 10
+bpmrange membp:ReadTarget, 1, r
+mbassertinfo membp:ReadTarget, 1, r, 1, 0
+run
+mbassertseq membp:ReadTarget
+run
+mbassertseq membp:ReadTarget, membp:ReadTarget
+run
+mbassertexit 0x1FE

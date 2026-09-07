@@ -1,0 +1,9 @@
+settingset Events, EntryBreakpoint, 1
+init tests/membp.exe
+run
+mbreset
+mbsetstartmode 5
+bpmrange membp:ExecSequence, 1, w
+mbassertinfo membp:ExecSequence, 1, w, 1, 0
+run
+mbassertnohit 0x33

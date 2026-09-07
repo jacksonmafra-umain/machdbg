@@ -1,0 +1,14 @@
+settingset Events, EntryBreakpoint, 1
+init tests/membp.exe
+run
+mbreset
+mbsetstartmode 30
+bp membp:LargeRangeSequence, ss
+run
+mbreset
+bpmrange [membp:LargePointer], 0x8000000, a
+mbassertinfo [membp:LargePointer], 0x8000000, a, 1, 0
+membpc [membp:LargePointer]
+mbassertabsent [membp:LargePointer]
+run
+mbassertnohit 0x68

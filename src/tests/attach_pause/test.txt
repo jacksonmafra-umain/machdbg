@@ -1,0 +1,3 @@
+// This test is driven entirely by driver.py (attach and pause are sent through
+// the interactive command handler to match the GUI code path). This script is
+// not executed.

@@ -1,0 +1,126 @@
+# Reference: https://build-cpp.github.io/cmkr/cmake-toml
+[cmake]
+version = "3.19"
+cmkr-include = "../../cmake/cmkr.cmake"
+
+[project]
+name = "cross"
+include-after = ["widgets/Qt.cmake"]
+cmake-after = """
+if(ELFBUG_BUILD_TESTS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    enable_testing()
+endif()
+"""
+
+[conditions]
+linux-x64 = "CMAKE_SYSTEM_NAME STREQUAL \"Linux\" AND CMAKE_SYSTEM_PROCESSOR MATCHES \"^(x86_64|amd64|AMD64)$\""
+elfbug-tests = "$<linux-x64> AND ELFBUG_BUILD_TESTS"
+
+[options]
+LIBPL_ENABLE_CLI = false
+LIBPL_ENABLE_TESTS = false
+LIBWOLV_ENABLE_TESTS = false
+ELFBUG_BUILD_TESTS = false
+
+[find-package.Threads]
+
+[subdir.widgets]
+
+[subdir.vendor]
+
+[template.qt_executable]
+type = "executable"
+add-function = "qt_executable"
+pass-sources = true
+compile-features = ["cxx_std_20"]
+
+[target.minidump]
+type = "qt_executable"
+sources = [
+    "minidump/*.cpp",
+    "minidump/*.h",
+    "minidump/*.ui",
+    "minidump/*.qrc",
+]
+link-libraries = [
+    "x64dbg::widgets",
+    "httplib::httplib",
+    "::linux-pe",
+    "::udmp-parser",
+]
+
+[target.remote_table]
+type = "qt_executable"
+sources = [
+    "remote_table/*.cpp",
+    "remote_table/*.h",
+    "remote_table/*.ui",
+    "remote_table/*.qrc",
+]
+link-libraries = [
+    "x64dbg::widgets",
+    "nlohmann_json::nlohmann_json",
+]
+
+[target.release_notes]
+type = "qt_executable"
+sources = [
+    "release_notes/*.cpp",
+    "release_notes/*.h",
+    "release_notes/*.ui",
+]
+include-directories = [
+    "release_notes",
+]
+link-libraries = [
+    "x64dbg::widgets",
+]
+
+[target.hex_viewer]
+type = "qt_executable"
+sources = [
+    "hex_viewer/*.cpp",
+    "hex_viewer/*.h",
+    "hex_viewer/*.ui",
+    "hex_viewer/*.qrc",
+]
+include-directories = [
+    "hex_viewer",
+]
+link-libraries = [
+    "x64dbg::widgets",
+    "::libpl",
+    "::libpl-gen",
+    "fmt::fmt-header-only",
+]
+
+[target.ElfBug]
+type = "static"
+condition = "linux-x64"
+sources = ["ElfBug/ElfBug/**.cpp"]
+headers = ["ElfBug/ElfBug/**.h"]
+compile-features = ["cxx_std_17"]
+include-directories = ["ElfBug"]
+link-libraries = ["Threads::Threads"]
+
+[target.debugger]
+type = "qt_executable"
+condition = "linux-x64"
+sources = [
+    "debugger/main.cpp",
+    "debugger/core/*.cpp",
+    "debugger/core/*.h",
+    "debugger/gui/*.cpp",
+    "debugger/gui/*.h",
+    "debugger/resources/icons.qrc",
+]
+private-include-directories = [
+    "debugger",
+]
+link-libraries = [
+    "x64dbg::widgets",
+    "::ElfBug",
+]
+
+[subdir."ElfBug/tests"]
+condition = "elfbug-tests"
