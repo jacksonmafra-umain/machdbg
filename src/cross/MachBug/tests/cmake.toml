@@ -64,10 +64,11 @@ properties.OUTPUT_NAME = "crash_bad_access"
 
 [target.MachBug_tests]
 type = "executable"
-sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp"]
+sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp", "mig_exception_server.cpp"]
 compile-features = ["cxx_std_17"]
 include-directories = ["../"]
-link-libraries = ["Catch2::Catch2WithMain"]
+include-before = ["../cmake/MachBugMig.cmake"]
+link-libraries = ["Catch2::Catch2WithMain", "machbug_mig"]
 compile-definitions = ['MACHBUG_TESTS_TARGETS_DIR="${CMAKE_BINARY_DIR}/tests/targets"']
 properties.RUNTIME_OUTPUT_DIRECTORY = "${CMAKE_BINARY_DIR}/tests"
 cmake-after = """
