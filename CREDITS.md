@@ -16,7 +16,7 @@ They wrote the x64dbg codebase this fork is built upon: mrexodia (Duncan Ogilvie
 
 ## Bound Upstream Relics
 
-TitanEngine Community Edition, Zydis, GleeBug, XEDParse, asmjit, Scylla, Jansson, lz4, the beetle sigil by VisualPharm, interface icons by Fugue, and the web altar by tr4ceflow.
+TitanEngine Community Edition, Zydis, GleeBug, XEDParse, asmjit, Scylla, Jansson, lz4, the bug icon by VisualPharm, interface icons by Fugue, and the website by tr4ceflow.
 
 Some of these relics no longer reside within machdbg. They remain credited because the dark logic forged around them still endures.
 
