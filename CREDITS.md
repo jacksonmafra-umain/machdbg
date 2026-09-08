@@ -3,7 +3,7 @@
 **I, Jackson Mafra, Supreme Necromancer and Architect of Death, have forged machdbg.**
 
 It is an independent GPLv3 fork raised from the bones of [x64dbg](https://github.com/x64dbg/x64dbg). 
-Every mortal and mechanism listed below has contributed to this construct—whether their code survives within my domain or has been consumed into the abyss.
+Every mortal and mechanism listed below is credited here—whether their code survives within my domain or has been consumed into the abyss.
 
 ## The Original Cult of x64dbg
 
