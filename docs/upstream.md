@@ -58,6 +58,21 @@ and, for the three files upstream also ships, that the local edit is still prese
   the Apple branch has to be reapplied by hand after every re-sync. Tasks 3 (bundle icon) and 4
   (`macdeployqt`) extend this same branch in place.
 
+  Task 3 adds, right after the `set_target_properties` block above (not inside it, and without
+  touching the `MACOSX_BUNDLE_GUI_IDENTIFIER` line that `scripts/verify-vendor.sh` greps for): a
+  `target_sources` call adding `packaging/machdbg.icns` to the target, a
+  `set_source_files_properties` call giving it `MACOSX_PACKAGE_LOCATION "Resources"`, and a second
+  `set_target_properties` call setting `MACOSX_BUNDLE_ICON_FILE "machdbg.icns"`. The `.icns` path is
+  spelled `${CMAKE_CURRENT_LIST_DIR}/../../packaging/machdbg.icns` — only two `..` segments, not
+  three. `qt_executable` is a `function()`, and CMake resolves `CMAKE_CURRENT_LIST_DIR` inside a
+  function against the *call site* (`src/cross/CMakeLists.txt`, i.e. `src/cross`), not the
+  directory of the file that defines the function (`src/cross/widgets`); this was verified with a
+  debug `message()` during configure, not assumed. Two `..` from `src/cross` reaches the repository
+  root, the same directory `MACOSX_BUNDLE_INFO_PLIST` above already reaches via
+  `${CMAKE_SOURCE_DIR}/../../packaging/Info.plist.in`. `packaging/machdbg.icns` itself is generated
+  from `src/bug.png` (256x256) by `packaging/make-icns.sh` and is committed, so an ordinary build
+  needs neither `sips` nor `iconutil`.
+
 ## Re-syncing
 
 1. Change `UPSTREAM_COMMIT` in `scripts/vendor-upstream.sh` and update the "Pinned commit" row
