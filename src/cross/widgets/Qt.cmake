@@ -60,11 +60,27 @@ endif()
 
 function(qt_executable tgt)
     if("${QT_PACKAGE}" STREQUAL "Qt6")
-        qt_add_executable(${tgt} WIN32 ${ARGN})
+        if(APPLE)
+            qt_add_executable(${tgt} MACOSX_BUNDLE ${ARGN})
+        else()
+            qt_add_executable(${tgt} WIN32 ${ARGN})
+        endif()
     else()
         add_executable(${tgt} ${ARGN})
     endif()
     target_link_libraries(${tgt} PRIVATE ${QT_LIBRARIES})
+
+    if(APPLE)
+        set_target_properties(${tgt} PROPERTIES
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/../../packaging/Info.plist.in"
+            MACOSX_BUNDLE_BUNDLE_NAME "${tgt}"
+            MACOSX_BUNDLE_EXECUTABLE_NAME "${tgt}"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "com.machdbg.${tgt}"
+            MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1"
+        )
+    endif()
 
     # Run windeployqt after build to copy Qt DLLs next to the executable.
     # Only do this once per runtime output directory to avoid multiple targets
