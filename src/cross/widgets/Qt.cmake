@@ -81,15 +81,16 @@ function(qt_executable tgt)
             MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1"
         )
 
-        # CMAKE_CURRENT_LIST_DIR here is the directory of the listfile that CALLS
-        # qt_executable() (src/cross, since qt_executable is a function: CMake
-        # resolves CMAKE_CURRENT_LIST_DIR against the call site, not the file
-        # that defines the function), not the directory containing Qt.cmake
-        # itself. Verified with a debug message() during configure. Two levels
-        # up from src/cross reaches the repository root, matching the sibling
-        # MACOSX_BUNDLE_INFO_PLIST path above (which spells the same directory
-        # via CMAKE_SOURCE_DIR).
-        set(_icns "${CMAKE_CURRENT_LIST_DIR}/../../packaging/machdbg.icns")
+        # Anchored on CMAKE_SOURCE_DIR, matching MACOSX_BUNDLE_INFO_PLIST above, rather than
+        # CMAKE_CURRENT_LIST_DIR. Inside a function(), CMAKE_CURRENT_LIST_DIR resolves against
+        # the call site (today, src/cross/CMakeLists.txt, i.e. src/cross for every caller of
+        # qt_executable()) rather than the file that defines the function (src/cross/widgets,
+        # where Qt.cmake itself lives) -- verified with a debug message() during configure.
+        # CMAKE_SOURCE_DIR has no such call-site dependency, so it stays correct even if a
+        # future caller invokes qt_executable() from a different directory, where
+        # CMAKE_CURRENT_LIST_DIR would silently start resolving somewhere else. Two levels up
+        # from CMAKE_SOURCE_DIR (src/cross) reaches the repository root.
+        set(_icns "${CMAKE_SOURCE_DIR}/../../packaging/machdbg.icns")
         target_sources(${tgt} PRIVATE "${_icns}")
         set_source_files_properties("${_icns}" PROPERTIES
             MACOSX_PACKAGE_LOCATION "Resources"
