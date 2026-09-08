@@ -434,6 +434,32 @@ namespace MachBug
         if(wasStepCompletion)
             setSingleStep(thread, false); // disarm; re-armed below only if StepInto() is chosen again
 
+        // EXC_SOFTWARE with code[0] == EXC_SOFT_SIGNAL is how PT_ATTACHEXC (Start(), above)
+        // routes an ordinary BSD signal through this port instead of delivering it directly --
+        // code[1] carries the signal number (e.g. SIGCONT). The very first exception this loop
+        // ever sees is deliberately treated as the target's first stop regardless of what kind it
+        // is (see the !mSeenFirstStop branch, below) -- in practice that first one always is this
+        // case, since it is the SIGCONT Start() sends to undo POSIX_SPAWN_START_SUSPENDED, turned
+        // into an exception by the same PT_ATTACHEXC. But a *second* signal-passthrough exception
+        // has also been observed arriving later (roughly one run in ten, most likely some other
+        // job-control signal transition this loop did not specifically arrange for) -- and unlike
+        // the first one, nothing in this milestone's contract gives a caller any way to have asked
+        // to be notified of it. Routing it to cbException() and parking the way a real debug
+        // exception parks -- as the code below used to, unconditionally -- left the reporting
+        // thread waiting for a Continue() call nobody knew to make: IsStopped() still reported
+        // false (mStopped was never the flag protecting this path), so nothing about the
+        // Debugger's own state told a caller a reply was outstanding, and the target hung forever
+        // with the reply withheld. The only correct thing to do with a signal-exception nothing
+        // asked for is what a debugger not stopping for it is supposed to do: let it through.
+        // Reply immediately -- without parking, without a stopped/cbException() callback, and
+        // without touching mStopped, since the target was never really "stopped" for this one.
+        constexpr int32_t kExcSoftSignal = 0x10003; // EXC_SOFT_SIGNAL
+        const bool isSignalPassthrough =
+            exception == EXC_SOFTWARE && codeCnt >= 1 && code[0] == kExcSoftSignal;
+
+        if(!wasStepCompletion && mSeenFirstStop && isSignalPassthrough)
+            return KERN_SUCCESS;
+
         {
             std::lock_guard<std::mutex> lock(mCmdMutex);
             mStopped.store(true, std::memory_order_release);
