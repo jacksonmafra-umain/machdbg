@@ -2,8 +2,10 @@
 #include <MachBug/core/Debugger.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <cstdio>
 #include <fcntl.h>
 #include <mutex>
@@ -49,14 +51,31 @@ namespace
             // Debugger.h. By the time the base destructor runs, mLoopThread is guaranteed to
             // have already returned from Start(), so Terminate() never races the loop thread's
             // own use of mProcess.
+            //
+            // Bounded, not a bare join(): a test that already called WaitForLoopToFinish() will
+            // find mLoopFinished already true and this is instant, but a test that did not (or a
+            // genuine regression in Stop()'s own teardown -- exactly what this file exists to
+            // catch) must not turn one failing test into a hung test binary. Detaching an
+            // abandoned thread here leaks it, harmlessly, for the rest of the process's life
+            // rather than block it forever.
             Stop();
             if(mLoopThread.joinable())
-                mLoopThread.join();
+            {
+                if(!mLoopFinished.load(std::memory_order_acquire))
+                    WaitForLoopToFinish();
+                if(mLoopFinished.load(std::memory_order_acquire))
+                    mLoopThread.join();
+                else
+                    mLoopThread.detach();
+            }
         }
 
         bool StartOnThread()
         {
-            mLoopThread = std::thread([this] { Start(); });
+            mLoopThread = std::thread([this] {
+                Start();
+                mLoopFinished.store(true, std::memory_order_release);
+            });
             return true;
         }
 
@@ -74,6 +93,21 @@ namespace
                 }
                 return false;
             });
+        }
+
+        // True once Start() (running on mLoopThread, via StartOnThread()) has actually returned.
+        // Polled rather than a timed std::thread::join() (which does not exist) -- see the
+        // destructor for why a caller that does not want to risk hanging the whole test binary on
+        // a regression needs this to be bounded rather than a bare join().
+        bool WaitForLoopToFinish(const std::chrono::milliseconds timeout = std::chrono::seconds(5))
+        {
+            const auto deadline = std::chrono::steady_clock::now() + timeout;
+            while(!mLoopFinished.load(std::memory_order_acquire) &&
+                  std::chrono::steady_clock::now() < deadline)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            return mLoopFinished.load(std::memory_order_acquire);
         }
 
         int LastExitCode() const { return mExitCode; }
@@ -96,6 +130,7 @@ namespace
         }
 
         std::thread mLoopThread;
+        std::atomic<bool> mLoopFinished{false};
         std::mutex mEventMutex;
         std::condition_variable mEventCv;
         std::queue<EventType> mEvents;
@@ -290,4 +325,95 @@ TEST_CASE("a second signal-passthrough exception is answered without parking")
     REQUIRE_FALSE(debugger.IsStopped());
 
     debugger.Terminate();
+}
+
+// Pins the signal-passthrough boundary from the other side: only SIGCONT is absorbed. A
+// signal-passthrough exception carrying any other signal -- SIGABRT here, standing in for a
+// target's own abort() or a user's SIGINT -- must still reach the ordinary cbException() path
+// (parked, waiting for a decision), not be silently swallowed the way an earlier, broader version
+// of this check (matching on code[0] alone, regardless of code[1]) would have. Safe to join
+// unconditionally: unlike the SIGCONT test above, the *correct* behavior here always parks and
+// always gets released by Continue(), so there is no regression shape that hangs this thread
+// instead of just failing the REQUIRE below.
+TEST_CASE("a signal-passthrough exception for a signal other than SIGCONT is not swallowed")
+{
+    MachBug::Debugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+
+    std::thread firstThread([&] {
+        debugger.handleException(MACH_PORT_NULL, EXC_BREAKPOINT, nullptr, 0);
+    });
+    for(int i = 0; i < 500 && !debugger.IsStopped(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(debugger.IsStopped());
+    debugger.Continue();
+    firstThread.join();
+    REQUIRE_FALSE(debugger.IsStopped());
+
+    // Same EXC_SOFTWARE/EXC_SOFT_SIGNAL shape as the SIGCONT case, but code[1] == SIGABRT instead.
+    mach_exception_data_type_t code[2] = {0x10003, SIGABRT};
+    std::atomic<bool> handlerReturned{false};
+    std::thread secondThread([&] {
+        debugger.handleException(MACH_PORT_NULL, EXC_SOFTWARE, code, 2);
+        handlerReturned.store(true, std::memory_order_release);
+    });
+
+    // If this were (wrongly) swallowed as a passthrough, handlerReturned would already be true by
+    // now instead of the call having parked.
+    for(int i = 0; i < 200 && !debugger.IsStopped(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(debugger.IsStopped());
+    REQUIRE_FALSE(handlerReturned.load(std::memory_order_acquire));
+
+    debugger.Continue();
+    secondThread.join();
+    REQUIRE(handlerReturned.load(std::memory_order_acquire));
+    REQUIRE_FALSE(debugger.IsStopped());
+
+    debugger.Terminate();
+}
+
+// The gap that let the Stop()-deadlock Critical through: every other Stop() in this file happens
+// after the target has already exited on its own (hello_machbug prints and exits; the direct-
+// handler tests never Start() a loop against a live target at all), so the teardown path against
+// a genuinely still-running target -- the one that actually kills it -- was never exercised. This
+// test starts run_endlessly (which never exits on its own), answers its first stop so it is truly
+// running freely (not merely resumed-but-still-inside-the-reply-plumbing) when Stop() is called,
+// and confirms both that the loop thread actually returns (bounded -- see
+// LocalRecordingDebugger::WaitForLoopToFinish()'s comment) and that the process is actually dead,
+// checked independently of this class's own bookkeeping via kill(pid, 0).
+TEST_CASE("Stop() kills a genuinely running target instead of hanging on its own SIGKILL")
+{
+    LocalRecordingDebugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+    REQUIRE(debugger.StartOnThread());
+    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+
+    const pid_t pid = debugger.GetPid();
+    debugger.Continue();
+
+    // No event to wait on for "now running freely, for real" -- give it a moment to actually
+    // resume and start spinning in run_endlessly's for(;;) sleep(1) loop, so Stop() below is
+    // exercised against a live, running target and not one still mid-resume.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    debugger.Stop();
+
+    // The bug this guards against: exceptionLoop()'s teardown used to send a bare SIGKILL to a
+    // target that is still ptrace(PT_ATTACHEXC)'d, with nobody left servicing its exception port
+    // -- the SIGKILL itself was routed through that port as another EXC_SOFT_SIGNAL and never
+    // answered, so the target never died and this call hung forever inside
+    // Process::WaitForRealExit(). Bounded so a regression here is a clean, fast FAILED instead of
+    // a hung test binary.
+    REQUIRE(debugger.WaitForLoopToFinish());
+
+    // The strongest confirmation available that the process is actually gone, not merely that
+    // this class's own bookkeeping believes so: ask the kernel directly. kill(pid, 0) sends no
+    // signal but still fails with ESRCH once pid no longer names a live process.
+    errno = 0;
+    const int rc = kill(pid, 0);
+    INFO("kill(pid, 0) returned " << rc << ", errno " << errno << " (" << strerror(errno) << ") "
+         "-- expected -1/ESRCH for a pid that is actually dead");
+    REQUIRE(rc == -1);
+    REQUIRE(errno == ESRCH);
 }
