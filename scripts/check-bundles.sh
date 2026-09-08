@@ -31,6 +31,15 @@ for app in hex_viewer minidump remote_table release_notes; do
     else
         pass "$app.app ($identifier)"
     fi
+
+    icon="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$plist" 2>/dev/null)"
+    if [[ -z "$icon" ]]; then
+        fail "$app.app Info.plist has no CFBundleIconFile"
+    elif [[ ! -f "$bundle/Contents/Resources/$icon" ]]; then
+        fail "$app.app declares icon $icon but Contents/Resources/$icon is missing"
+    else
+        pass "$app.app icon $icon"
+    fi
 done
 
 exit "$failed"
