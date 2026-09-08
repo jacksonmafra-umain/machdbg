@@ -88,15 +88,18 @@ endif()
 # across formulae live under share/), while the official installer keeps them directly
 # under "plugins/"; QT_INSTALL_PLUGINS is correct for either layout.
 #
-# Gated on TARGET ${QT_PACKAGE}::macdeployqt, matching the consumer below exactly (the only
-# thing that actually uses qt_install_plugins is gated on ::macdeployqt existing, nothing
-# else). Locating the plugins directory needs qmake, so ::qmake is checked too, but *inside*
-# the block rather than ANDed into its guard: that keeps the outer condition identical to the
-# consumer's, and turns "qmake is missing" into an immediate, clearly-worded configure error
-# instead of silently leaving qt_install_plugins unset for the consumer to fail on later with
-# a cryptic `cmake -E copy ".../platforms/libqoffscreen.dylib"` (a leading slash and nothing
-# else -- the empty variable). This is the failure mode this file already hit once; a Qt that
-# exports macdeployqt but not qmake would otherwise reproduce it in a new form.
+# Gated on TARGET ${QT_PACKAGE}::macdeployqt, the same target the consumer below (the only
+# thing that actually uses qt_install_plugins) is gated on. The leading ${QT_PACKAGE}_FOUND
+# here is redundant with, not divergent from, that consumer: find_package(${QT_PACKAGE} ...
+# REQUIRED) above already guarantees it by the time this line runs, so it can never be false
+# where the consumer's guard would be true. Locating the plugins directory needs qmake, so
+# ::qmake is checked too, but *inside* the block rather than ANDed into its guard: that keeps
+# the TARGET half of the outer condition matching the consumer's, and turns "qmake is missing"
+# into an immediate, clearly-worded configure error instead of silently leaving
+# qt_install_plugins unset for the consumer to fail on later with a cryptic
+# `cmake -E copy ".../platforms/libqoffscreen.dylib"` (a leading slash and nothing else -- the
+# empty variable). This is the failure mode this file already hit once; a Qt that exports
+# macdeployqt but not qmake would otherwise reproduce it in a new form.
 if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::macdeployqt)
     if(NOT TARGET ${QT_PACKAGE}::qmake)
         message(FATAL_ERROR "${QT_PACKAGE}::macdeployqt is exported but ${QT_PACKAGE}::qmake is not; "
