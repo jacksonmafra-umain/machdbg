@@ -88,14 +88,23 @@ endif()
 # across formulae live under share/), while the official installer keeps them directly
 # under "plugins/"; QT_INSTALL_PLUGINS is correct for either layout.
 #
-# Gated on TARGET ${QT_PACKAGE}::macdeployqt, not just ::qmake: the only thing that
-# actually consumes qt_install_plugins below is gated on ::macdeployqt existing, so this
-# guard is written to match that consumer exactly. Gating on ::qmake alone would let a Qt
-# that exports qmake but not macdeployqt skip this block, leaving qt_install_plugins unset
-# without anyone noticing -- until a future Qt export shape makes the consumer's own guard
-# true while this one silently isn't, reproducing the same empty-variable, wrong-path
-# failure this file already hit once.
-if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::qmake AND TARGET ${QT_PACKAGE}::macdeployqt)
+# Gated on TARGET ${QT_PACKAGE}::macdeployqt, the same target the consumer below (the only
+# thing that actually uses qt_install_plugins) is gated on. The leading ${QT_PACKAGE}_FOUND
+# here is redundant with, not divergent from, that consumer: find_package(${QT_PACKAGE} ...
+# REQUIRED) above already guarantees it by the time this line runs, so it can never be false
+# where the consumer's guard would be true. Locating the plugins directory needs qmake, so
+# ::qmake is checked too, but *inside* the block rather than ANDed into its guard: that keeps
+# the TARGET half of the outer condition matching the consumer's, and turns "qmake is missing"
+# into an immediate, clearly-worded configure error instead of silently leaving
+# qt_install_plugins unset for the consumer to fail on later with a cryptic
+# `cmake -E copy ".../platforms/libqoffscreen.dylib"` (a leading slash and nothing else -- the
+# empty variable). This is the failure mode this file already hit once; a Qt that exports
+# macdeployqt but not qmake would otherwise reproduce it in a new form.
+if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::macdeployqt)
+    if(NOT TARGET ${QT_PACKAGE}::qmake)
+        message(FATAL_ERROR "${QT_PACKAGE}::macdeployqt is exported but ${QT_PACKAGE}::qmake is not; "
+            "locating the offscreen platform plugin (QT_INSTALL_PLUGINS) requires qmake.")
+    endif()
     get_target_property(_qt_qmake_location ${QT_PACKAGE}::qmake IMPORTED_LOCATION)
     execute_process(
         COMMAND "${_qt_qmake_location}" -query QT_INSTALL_PLUGINS
@@ -105,6 +114,21 @@ if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::qmake AND TARGET ${QT
     )
     if(NOT return_code EQUAL 0 OR NOT qt_install_plugins)
         message(FATAL_ERROR "Could not query QT_INSTALL_PLUGINS from ${_qt_qmake_location} (return code ${return_code})")
+    endif()
+endif()
+
+if(APPLE)
+    # Both packaging inputs below (Info.plist.in and machdbg.icns) live two levels up from
+    # CMAKE_SOURCE_DIR (src/cross), i.e. at the repository root. Computed once here, with an
+    # EXISTS guard, rather than spelled out at each use: that makes the src/cross-is-the-
+    # CMake-top-level assumption an assertion instead of something both call sites silently
+    # rely on -- a future repository-root CMakeLists.txt that changes CMAKE_SOURCE_DIR breaks
+    # loudly here instead of quietly wherever qt_executable() next fails to find these files.
+    set(MACHDBG_PACKAGING_DIR "${CMAKE_SOURCE_DIR}/../../packaging")
+    if(NOT EXISTS "${MACHDBG_PACKAGING_DIR}")
+        message(FATAL_ERROR "Expected the packaging directory at ${MACHDBG_PACKAGING_DIR} "
+            "(two levels up from CMAKE_SOURCE_DIR, ${CMAKE_SOURCE_DIR}) -- this assumes "
+            "src/cross is the CMake top level; update MACHDBG_PACKAGING_DIR if that changes.")
     endif()
 endif()
 
@@ -123,7 +147,7 @@ function(qt_executable tgt)
     if(APPLE)
         set_target_properties(${tgt} PROPERTIES
             MACOSX_BUNDLE TRUE
-            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/../../packaging/Info.plist.in"
+            MACOSX_BUNDLE_INFO_PLIST "${MACHDBG_PACKAGING_DIR}/Info.plist.in"
             MACOSX_BUNDLE_BUNDLE_NAME "${tgt}"
             MACOSX_BUNDLE_EXECUTABLE_NAME "${tgt}"
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.machdbg.${tgt}"
@@ -131,16 +155,16 @@ function(qt_executable tgt)
             MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1"
         )
 
-        # Anchored on CMAKE_SOURCE_DIR, matching MACOSX_BUNDLE_INFO_PLIST above, rather than
-        # CMAKE_CURRENT_LIST_DIR. Inside a function(), CMAKE_CURRENT_LIST_DIR resolves against
-        # the call site (today, src/cross/CMakeLists.txt, i.e. src/cross for every caller of
-        # qt_executable()) rather than the file that defines the function (src/cross/widgets,
-        # where Qt.cmake itself lives) -- verified with a debug message() during configure.
-        # CMAKE_SOURCE_DIR has no such call-site dependency, so it stays correct even if a
-        # future caller invokes qt_executable() from a different directory, where
-        # CMAKE_CURRENT_LIST_DIR would silently start resolving somewhere else. Two levels up
-        # from CMAKE_SOURCE_DIR (src/cross) reaches the repository root.
-        set(_icns "${CMAKE_SOURCE_DIR}/../../packaging/machdbg.icns")
+        # MACHDBG_PACKAGING_DIR (set above from CMAKE_SOURCE_DIR, matching
+        # MACOSX_BUNDLE_INFO_PLIST above) is used rather than CMAKE_CURRENT_LIST_DIR. Inside a
+        # function(), CMAKE_CURRENT_LIST_DIR resolves against the call site (today,
+        # src/cross/CMakeLists.txt, i.e. src/cross for every caller of qt_executable()) rather
+        # than the file that defines the function (src/cross/widgets, where Qt.cmake itself
+        # lives) -- verified with a debug message() during configure. CMAKE_SOURCE_DIR has no
+        # such call-site dependency, so it stays correct even if a future caller invokes
+        # qt_executable() from a different directory, where CMAKE_CURRENT_LIST_DIR would
+        # silently start resolving somewhere else.
+        set(_icns "${MACHDBG_PACKAGING_DIR}/machdbg.icns")
         target_sources(${tgt} PRIVATE "${_icns}")
         set_source_files_properties("${_icns}" PROPERTIES
             MACOSX_PACKAGE_LOCATION "Resources"

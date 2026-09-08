@@ -15,15 +15,37 @@ if [[ "${MACHDBG_SMOKE_OFFSCREEN:-0}" == "1" ]]; then
     export QT_QPA_PLATFORM=offscreen
 fi
 
-for app in hex_viewer minidump; do
+for app in hex_viewer minidump remote_table release_notes; do
     binary="$build_dir/$app.app/Contents/MacOS/$app"
     if [[ ! -x "$binary" ]]; then
         fail "$app has no executable to launch"
         continue
     fi
 
+    # release_notes requires a markdown file argument (see its main(), which prints a
+    # usage message and exits immediately without one) -- launching it bare tests only
+    # that we called it wrong, not whether it works. README.md is a real file already in
+    # the tree, so this at least parses real markdown instead of a fixture nobody
+    # maintains, rather than exercising every downstream rendering path. No other app
+    # takes an argument.
+    #
+    # Positional parameters (set -- / "$@"), not an array, carry that argument: under
+    # `set -u`, expanding an empty array as "${args[@]}" is an unbound-variable error on
+    # bash 3.2 -- the only bash /bin/bash actually is on macos-15 runners, regardless of
+    # what a Homebrew bash on PATH makes `#!/usr/bin/env bash` pick up locally. "$@" has
+    # no such problem even with zero positional parameters, on any bash version.
+    set --
+    if [[ "$app" == "release_notes" ]]; then
+        md_file="README.md"
+        if [[ ! -f "$md_file" ]]; then
+            fail "$app has no $md_file to smoke-test against"
+            continue
+        fi
+        set -- "$md_file"
+    fi
+
     log="$(mktemp)"
-    "$binary" >"$log" 2>&1 &
+    "$binary" "$@" >"$log" 2>&1 &
     pid=$!
 
     # Give the application time to reach its first window or die trying.
