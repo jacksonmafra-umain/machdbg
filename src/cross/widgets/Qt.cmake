@@ -57,6 +57,10 @@ if(${QT_PACKAGE}_FOUND AND WIN32 AND TARGET ${QT_PACKAGE}::qmake AND NOT TARGET 
     endif()
 endif()
 
+# Qt 6's own CMake package config already exports a Qt6::macdeployqt imported target
+# (unlike windeployqt above, which genuinely needs the block below to create one), so this
+# guard is normally false and the block does not run. It is kept as a fallback for Qt
+# versions or configurations where that target is absent.
 if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::qmake AND NOT TARGET ${QT_PACKAGE}::macdeployqt)
     get_target_property(_qt_qmake_location ${QT_PACKAGE}::qmake IMPORTED_LOCATION)
 
@@ -74,6 +78,25 @@ if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::qmake AND NOT TARGET 
         set_target_properties(${QT_PACKAGE}::macdeployqt PROPERTIES
             IMPORTED_LOCATION ${imported_location}
         )
+    endif()
+endif()
+
+# Queried unconditionally (not tied to the target-creation block above, which Qt 6.11's
+# own exported Qt6::macdeployqt target skips) because the offscreen platform plugin isn't
+# linked by anything, so macdeployqt never discovers or copies it -- it has to be found
+# and placed by hand. Homebrew's Qt keeps plugins under "share/qt/plugins" (files shared
+# across formulae live under share/), while the official installer keeps them directly
+# under "plugins/"; QT_INSTALL_PLUGINS is correct for either layout.
+if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::qmake)
+    get_target_property(_qt_qmake_location ${QT_PACKAGE}::qmake IMPORTED_LOCATION)
+    execute_process(
+        COMMAND "${_qt_qmake_location}" -query QT_INSTALL_PLUGINS
+        RESULT_VARIABLE return_code
+        OUTPUT_VARIABLE qt_install_plugins
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT return_code EQUAL 0 OR NOT qt_install_plugins)
+        message(FATAL_ERROR "Could not query QT_INSTALL_PLUGINS from ${_qt_qmake_location} (return code ${return_code})")
     endif()
 endif()
 
@@ -123,10 +146,28 @@ function(qt_executable tgt)
     # its load commands. Unlike windeployqt below, this needs no once-per-directory guard:
     # TARGET_BUNDLE_DIR is the target's own <tgt>.app, a directory no other target writes
     # into, so concurrent macdeployqt runs across the four bundles cannot race each other.
+    #
+    # macdeployqt rewrites install names and strips the copied frameworks and plugins
+    # after its own ad-hoc codesign pass, which invalidates their signatures -- it warns
+    # about this itself ("codesign verification error ... invalid signature") but does not
+    # correct it. On this machine that is not cosmetic: the kernel's code-signing
+    # enforcement SIGKILLs the process the instant it pages in the first tainted dylib
+    # (confirmed via `log show` -- "CODE SIGNING: cs_invalid_page ... denying page sending
+    # SIGKILL"), so every bundle died before showing a window. Re-signing ad-hoc after
+    # macdeployqt fixes the signature and lets the bundle launch.
+    #
+    # macdeployqt also only deploys the platform plugin(s) the build actually needs to
+    # display a window (libqcocoa.dylib here), not the offscreen one -- there is no
+    # linked reference to it for macdeployqt to discover. The offscreen platform is what
+    # CI selects via QT_QPA_PLATFORM=offscreen (no window server there), so it is copied
+    # in by hand from Qt's own plugin directory.
     if(APPLE AND TARGET ${QT_PACKAGE}::macdeployqt)
         add_custom_command(TARGET ${tgt} POST_BUILD
             COMMAND ${QT_PACKAGE}::macdeployqt "$<TARGET_BUNDLE_DIR:${tgt}>" -always-overwrite
-            COMMENT "Running macdeployqt on ${tgt}..."
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_BUNDLE_DIR:${tgt}>/Contents/PlugIns/platforms"
+            COMMAND ${CMAKE_COMMAND} -E copy "${qt_install_plugins}/platforms/libqoffscreen.dylib" "$<TARGET_BUNDLE_DIR:${tgt}>/Contents/PlugIns/platforms/libqoffscreen.dylib"
+            COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:${tgt}>"
+            COMMENT "Running macdeployqt on ${tgt}, adding the offscreen platform plugin, and re-signing..."
         )
     endif()
 
