@@ -57,3 +57,7 @@ target_link_libraries(MachBug PUBLIC
 	machbug_mig
 	Threads::Threads
 )
+
+target_link_options(MachBug PUBLIC
+	-Wl,-u,_catch_mach_exception_raise_state_identity
+)

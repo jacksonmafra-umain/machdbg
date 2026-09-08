@@ -35,3 +35,20 @@ include-before = ["../cmake/MachBugMig.cmake"]
 # is documented to run on a caller-owned thread, so this library links pthread explicitly rather
 # than relying on it coming in transitively from something else that happens to.
 link-libraries = ["machbug_mig", "Threads::Threads"]
+# Forces catch_mach_exception_raise_state_identity to be an initially-undefined symbol for any
+# final link that includes MachBug, the same way a real reference from the very first object
+# file would. Without this, a lazy, single-pass static linker (ld64 included) can resolve
+# mach_excServer.c.o's reference to this symbol using MachBugMigStubs.c.o's *weak* fallback --
+# which lives in the same archive (machbug_mig) as mach_excServer.c.o itself -- without ever
+# extracting ExceptionServer.cpp.o's *strong* definition from libMachBug.a at all, if libMachBug.a
+# was already fully scanned earlier in the link line and nothing else in it had asked for this
+# specific symbol yet. That is not a hypothetical: it is exactly what happened building
+# MachBug_tests (libMachBug.a is listed before libmachbug_mig.a) -- the weak stub's one-time
+# stderr warning fired on the very first real exception this loop ever received, meaning the
+# strong handler was never even linked in, silently. `-u` seeds the symbol as wanted from the
+# start of the link, so whichever archive is scanned first that can provide it -- libMachBug.a,
+# with the strong definition -- does, before libmachbug_mig.a's weak fallback is ever consulted.
+# PUBLIC scope (this target's default) is what makes it reach every final executable that links
+# MachBug, not just this project's own test binary; the same lazy-extraction race applies equally
+# to whatever links MachBug for real, later in the milestone.
+link-options = ["-Wl,-u,_catch_mach_exception_raise_state_identity"]
