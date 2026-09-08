@@ -7,6 +7,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <sys/types.h>
@@ -83,22 +85,58 @@ namespace MachBug::test
     public:
         // Same ordering requirement ~Debugger() documents on itself: if Start() is still running
         // on mLoopThread when a derived destructor runs, that thread must already have returned
-        // before ~Debugger() tears down mProcess. Stop() + a *bounded* join is what guarantees
-        // that here -- not a bare join(), which would turn a genuine regression in Stop()'s own
+        // before ~Debugger() tears down mProcess. Stop() + a *bounded* wait is what this tries to
+        // guarantee -- not a bare join(), which would turn a genuine regression in Stop()'s own
         // teardown (exactly the bug Task 4's "Stop() kills a genuinely running target" test
         // guards against) into a hung test binary instead of one failing test.
+        //
+        // But the bounded wait can still time out, and what happens next matters: the instant
+        // this destructor returns, ~Debugger() runs unconditionally and calls Terminate(), which
+        // does `mProcess.reset()` -- destroying the Process object (and, via ~Process(),
+        // deallocating its Mach task port) whether or not mLoopThread has actually stopped
+        // touching it. If exceptionLoop() is still running on mLoopThread at that point (which is
+        // exactly what a timed-out wait means), it is still reading and writing that same
+        // mProcess -- so continuing on to ~Debugger() is a genuine use-after-free race, not a
+        // harmless leak. An earlier version of this destructor detached mLoopThread and let
+        // ~Debugger() proceed anyway on the theory that a detached thread "leaks harmlessly";
+        // that was wrong -- detaching only stops *this* class from waiting on the thread, it does
+        // nothing to stop ~Debugger() from destroying what that detached thread still reads.
+        //
+        // Neither this class nor core/Debugger.h (owned by a concurrent task -- see this file's
+        // header comment -- and not modified here) gives a derived destructor any way to skip or
+        // delay ~Debugger()'s own teardown once this function returns: C++ runs a derived
+        // destructor's base subobject destructor unconditionally right after, whether the derived
+        // one returns normally or throws. The only way left, from tests/, to make sure Terminate()
+        // never touches mProcess while mLoopThread might still be using it is to never reach that
+        // return at all: abort() before it. That is a deliberate escape hatch, not a shortcut --
+        // it fires in exactly one circumstance (Stop() failing to bring the loop down), which is
+        // precisely the class of regression this harness exists to catch, and aborting there turns
+        // what would otherwise be a silent corruption (surfacing, if at all, as a bewildering crash
+        // in some unrelated later test) into an immediate, loud, unmistakably-attributed failure --
+        // Catch2's own fatal-condition handler additionally reports which test case was running
+        // when it happened, on top of the message below naming the cause directly.
         ~RecordingDebugger() override
         {
             Stop();
-            if(mLoopThread.joinable())
+            if(!mLoopThread.joinable())
+                return;
+
+            if(!WaitForLoopToFinish())
             {
-                if(!loopFinished())
-                    WaitForLoopToFinish();
-                if(loopFinished())
-                    mLoopThread.join();
-                else
-                    mLoopThread.detach();
+                std::fprintf(stderr,
+                    "\nRecordingDebugger: Stop() did not bring the exception loop down within the "
+                    "timeout.\nThe loop thread is still running and still touching state "
+                    "~Debugger() is about to\ndestroy (Terminate() -> mProcess.reset() -> "
+                    "~Process() -> mach_port_deallocate);\ncontinuing would be a use-after-free "
+                    "race, not a harmless leak, so this process is\naborting instead of letting "
+                    "that happen. This means Stop() itself has regressed --\nlook at "
+                    "Debugger::Stop()/exceptionLoop()'s teardown, not at whatever test happens\n"
+                    "to run (or crash) next.\n\n");
+                std::fflush(stderr);
+                std::abort();
             }
+
+            mLoopThread.join();
         }
 
         void StartOnThread()
@@ -224,12 +262,6 @@ namespace MachBug::test
         }
 
     private:
-        bool loopFinished() const
-        {
-            std::lock_guard lock(mMutex);
-            return mLoopFinished;
-        }
-
         void push(Event e)
         {
             e.when = std::chrono::steady_clock::now();
