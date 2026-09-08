@@ -125,11 +125,32 @@ and, for the three files upstream also ships, that the local edit is still prese
    and restoring the files listed above under "What was changed locally" — and, at the end of
    the run, prints the line `done. resolved commit: <sha>`. Copy that full SHA into the
    "Resolved commit" row above — the short pin and the full SHA must both be updated, or the
-   table is ambiguous again.
+   table is ambiguous again. The first time this runs after the reference files under
+   `upstream-refs/` are introduced (or for a path newly added to `AUTHORED_PATHS`), it also
+   prints a `note:` line saying it recorded a baseline for that path rather than compared
+   against one — expected once, not a sign of anything wrong.
 3. Run `./scripts/strip-windows.sh` to reapply the removals.
 4. Run `./scripts/verify-vendor.sh`.
 5. Review the diff. Local changes to vendored files that are *not* listed under "What was
    changed locally" are overwritten by step 2, so the diff is the upstream merge, and it is
    expected to be large. The files listed under "What was changed locally" are preserved across
-   the re-vendor and should not appear in the diff at all; if one does, the restore step failed
-   and needs investigating before the diff is reviewed.
+   the re-vendor and should not appear in the diff at all — but if one does, there are now two
+   different causes to tell apart, and `scripts/vendor-upstream.sh` distinguishes them for you:
+
+   - **No warning was printed for the file, but it still shows up in the diff.** The restore
+     step failed. Investigate before reviewing the rest of the diff.
+   - **`scripts/vendor-upstream.sh` printed a boxed `UPSTREAM CHANGED A PRESERVED FILE` warning
+     for the file**, naming it and a `diff` command comparing two copies saved under a
+     `machdbg-vendor-diverged.*` temporary directory. This is not a restore failure: the local
+     edit is intact, but upstream's *own* version of that file changed since the last re-sync,
+     and restoring the local edit (correctly) means upstream's change was not applied — silently,
+     unless someone folds it in by hand. The comparison is against `upstream-refs/<path>`, a copy
+     of upstream's version of the file as of the last re-sync, tracked in git alongside the
+     vendored tree and overwritten every run; the warning fires when the fresh clone no longer
+     matches what's there. Only the three files shared with upstream (`src/cross/cmake.toml`,
+     `src/cross/CMakeLists.txt`, `cmake/cmkr.cmake`) can trigger this — the other preserved files
+     (the MachBug header and tests, `CMakePresets.json`) have no upstream counterpart at all and
+     are never compared. Run the `diff` command the warning prints to see exactly what upstream
+     changed, decide whether it needs folding into the local edit, and do that by hand — the
+     script cannot merge it for you. The warning also repeats as a one-line summary near the end
+     of the script's output, so it survives being scrolled past.
