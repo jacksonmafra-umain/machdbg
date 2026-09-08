@@ -49,6 +49,9 @@ required=(
     src/cross/MachBug/tests/targets/run_endlessly.cpp
     src/cross/MachBug/tests/targets/multi_threaded.cpp
     src/cross/MachBug/tests/targets/crash_bad_access.cpp
+    src/cross/MachBug/tests/mig_exception_server.cpp
+    src/cross/MachBug/cmake/MachBugMig.cmake
+    src/cross/MachBug/cmake/MachBugMigStubs.c
     src/cross/CMakePresets.json
     src/cross/CMakeLists.txt
 )
