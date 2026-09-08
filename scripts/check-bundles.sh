@@ -48,6 +48,19 @@ for app in hex_viewer minidump remote_table release_notes; do
     else
         pass "$app.app Qt resolves inside the bundle"
     fi
+
+    # A structural pass alone missed the very bug this project was built to expose:
+    # macdeployqt strips its own copied files after signing them, invalidating the
+    # signature, and every earlier check here is blind to it -- only launching the
+    # bundle (or asking codesign directly) can see it. Qt.cmake re-signs and verifies
+    # at build time, but that only protects whoever runs that exact build; this check
+    # gives the same signal to anyone who inherits a build tree without rebuilding it.
+    signature_error="$(codesign --verify --deep --strict "$bundle" 2>&1 >/dev/null)"
+    if [[ -n "$signature_error" ]]; then
+        fail "$app.app has an invalid code signature: $(echo "$signature_error" | tr '\n' ' ')"
+    else
+        pass "$app.app code signature verifies"
+    fi
 done
 
 exit "$failed"

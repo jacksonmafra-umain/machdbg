@@ -9,11 +9,19 @@ Do not bring your weak Windows PE binaries into my domain, nor mistake this for 
 
 ## Status
 
-Milestone 0 is complete: The upstream tree has been chained, stripped, and forced to configure under CMake, with the engine contract header bound in place. No active debugging behavior creeps within these shadows yet—only the framework of their upcoming torment.
+Milestone 0 is complete: The upstream tree has been chained, stripped, and forced to configure under CMake, with the engine contract header bound in place. Milestone 1 now stirs: the cross-platform widget sample applications rise as proper `.app` bundles, Qt frameworks and all, and — proven below, not merely asserted — they open their eyes and walk upon Apple Silicon. No active debugging behavior creeps within these shadows yet—only the framework of their upcoming torment.
 
 * Seek the milestones and issues to glimpse my grand design.
 * Consult [docs/COMPILE-macos.md](docs/COMPILE-macos.md) to forge the binary yourself.
 * Read [docs/upstream.md](docs/upstream.md) to see how the vendored tree remains bound to x64dbg.
+
+### Proof of life
+
+Two of the widget samples, resurrected as native macOS bundles and caught mid-summoning:
+
+<img src="docs/screenshots/hex_viewer.png" alt="hex_viewer running as a native macOS app" width="480"> <img src="docs/screenshots/minidump.png" alt="minidump running as a native macOS app" width="480">
+
+These are the cross-platform widget samples, running natively on macOS.
 
 ## Law & Decrees
 

@@ -94,6 +94,27 @@ and, for the three files upstream also ships, that the local edit is still prese
   inspecting the build tree — each of the four bundles is its own top-level directory under
   `build/macos-arm64/`, sharing nothing a concurrent `macdeployqt` run could corrupt.
 
+  Task 5 found, by actually launching the bundles Task 4 produced (`scripts/smoke-launch.sh`),
+  that the `macdeployqt` step above is not merely noisy but load-bearing-broken: it rewrites
+  install names and strips the copied frameworks and plugins after its own ad-hoc codesign pass,
+  which invalidates their signatures — `macdeployqt` warns about this itself
+  ("codesign verification error ... invalid signature") but does not correct it. On this machine
+  that surfaced as every bundle dying to the kernel's code-signing enforcement the instant it
+  paged in the first modified-after-signing dylib (confirmed with `log show` — "CODE SIGNING:
+  cs_invalid_page ... denying page sending SIGKILL"), before a window ever appeared. The same
+  `add_custom_command` gained two more `COMMAND` lines: `codesign --force --deep --sign -` to
+  re-sign the whole bundle ad-hoc after `macdeployqt` runs, and a `cmake -E copy` of
+  `libqoffscreen.dylib` into `Contents/PlugIns/platforms` beforehand — `macdeployqt` only copies
+  the platform plugin(s) a bundle's link graph actually references (`libqcocoa.dylib` here), so
+  the offscreen platform smoke-launch and CI select via `QT_QPA_PLATFORM=offscreen` was absent
+  from every bundle until this task added it by hand. Locating `libqoffscreen.dylib` needed a
+  second `qmake -query`, this one for `QT_INSTALL_PLUGINS`, added as its own unconditional block
+  right before `qt_executable`: it cannot live inside the existing `NOT TARGET
+  ${QT_PACKAGE}::macdeployqt` guard immediately above, which turned out to never fire on this Qt
+  version — Qt 6.11's own CMake package config already exports a `Qt6::macdeployqt` target, so
+  that guard (and the `QT_INSTALL_PREFIX` query beside it) has been dead code since Task 4, kept
+  only as a fallback for Qt configurations where Qt does not export that target itself.
+
 ## Re-syncing
 
 1. Change `UPSTREAM_COMMIT` in `scripts/vendor-upstream.sh` and update the "Pinned commit" row
