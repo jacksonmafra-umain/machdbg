@@ -62,14 +62,20 @@ and, for the three files upstream also ships, that the local edit is still prese
   touching the `MACOSX_BUNDLE_GUI_IDENTIFIER` line that `scripts/verify-vendor.sh` greps for): a
   `target_sources` call adding `packaging/machdbg.icns` to the target, a
   `set_source_files_properties` call giving it `MACOSX_PACKAGE_LOCATION "Resources"`, and a second
-  `set_target_properties` call setting `MACOSX_BUNDLE_ICON_FILE "machdbg.icns"`. The `.icns` path is
-  spelled `${CMAKE_CURRENT_LIST_DIR}/../../packaging/machdbg.icns` — only two `..` segments, not
-  three. `qt_executable` is a `function()`, and CMake resolves `CMAKE_CURRENT_LIST_DIR` inside a
-  function against the *call site* (`src/cross/CMakeLists.txt`, i.e. `src/cross`), not the
-  directory of the file that defines the function (`src/cross/widgets`); this was verified with a
-  debug `message()` during configure, not assumed. Two `..` from `src/cross` reaches the repository
-  root, the same directory `MACOSX_BUNDLE_INFO_PLIST` above already reaches via
-  `${CMAKE_SOURCE_DIR}/../../packaging/Info.plist.in`. `packaging/machdbg.icns` itself is generated
+  `set_target_properties` call setting `MACOSX_BUNDLE_ICON_FILE "machdbg.icns"`. The `.icns` path
+  is spelled `${CMAKE_SOURCE_DIR}/../../packaging/machdbg.icns` — two `..` segments, the same
+  anchor `MACOSX_BUNDLE_INFO_PLIST` above already uses via
+  `${CMAKE_SOURCE_DIR}/../../packaging/Info.plist.in`. It is deliberately not spelled with
+  `CMAKE_CURRENT_LIST_DIR`, which was tried first and rejected: `qt_executable` is a `function()`,
+  and CMake resolves `CMAKE_CURRENT_LIST_DIR` inside a function against the *call site* (today,
+  `src/cross/CMakeLists.txt`, i.e. `src/cross` for every current caller of `qt_executable()`), not
+  the directory of the file that defines the function (`src/cross/widgets`, where `Qt.cmake`
+  itself lives) — verified with a debug `message()` during configure, not assumed. That
+  call-site dependency is invisible today because every current caller happens to live in
+  `src/cross`; it would only start resolving somewhere else once a future caller invoked
+  `qt_executable()` from a different directory, and the bug would surface as a missing icon rather
+  than a configure error. `CMAKE_SOURCE_DIR` has no such dependency, so the icon path is anchored
+  on it instead, matching `MACOSX_BUNDLE_INFO_PLIST`. `packaging/machdbg.icns` itself is generated
   from `src/bug.png` (256x256) by `packaging/make-icns.sh` and is committed, so an ordinary build
   needs neither `sips` nor `iconutil`.
 
