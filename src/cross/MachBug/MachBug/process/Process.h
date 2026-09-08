@@ -36,5 +36,45 @@ namespace MachBug
         // task_for_pid -- the single most common failure in the whole product -- never surfaces
         // as "unknown error".
         static std::string DescribeKernReturn(kern_return_t kr);
+
+        // True if a waitpid() status represents an actual termination (WIFEXITED or
+        // WIFSIGNALED), as opposed to a WIFSTOPPED job-control/ptrace stop notification. A child
+        // that Debugger::Start() has ptrace(PT_ATTACHEXC)'d (see Debugger.Loop.cpp) reports
+        // ordinary ptrace stops through waitpid() too -- for instance while one of its threads is
+        // parked on an unanswered Mach exception reply -- in a status that is indistinguishable
+        // from a real exit ((int)status alone) unless this is checked explicitly. Treating any
+        // waitpid() return of a pid as proof of exit, unconditionally, silently announces a live
+        // target as dead.
+        static bool IsRealExit(int status);
+
+        // The exit code a status IsRealExit() has already confirmed represents: WEXITSTATUS()
+        // for a normal exit, -WTERMSIG() for one killed by a signal. Mirrors ElfBug's convention.
+        static int ExitCodeFromStatus(int status);
+
+        // Blocks in waitpid(pid, ..., 0) until the process actually terminates (IsRealExit()
+        // true), discarding any WIFSTOPPED notification in between -- see IsRealExit()'s comment
+        // for why a single, un-looped waitpid() call is not enough to conclude a traced child has
+        // died: there can be more than one stop notification queued ahead of the eventual death,
+        // and picking up one of those instead (e.g. right after sending SIGKILL, to confirm it
+        // took effect) means observing a status that looks like an exit but is not one -- or,
+        // worse, simply not noticing the child is still alive at all. Writes the exit code to
+        // *exitCode (mirroring ExitCodeFromStatus()) when it is not null. Returns false only if
+        // pid could never be waited on at all (waitpid() itself failed, e.g. ECHILD -- already
+        // reaped, or never existed).
+        static bool WaitForRealExit(pid_t pid, int* exitCode);
+
+        // Detaches ptrace, then SIGKILLs pid, then blocks until it actually dies
+        // (WaitForRealExit()). The detach has to come first: a pid that is still
+        // ptrace(PT_ATTACHEXC)'d (Debugger::Start()) routes SIGKILL through its Mach exception
+        // port exactly like any other signal, and a caller reaching for this is, by construction,
+        // one that has already stopped servicing that port -- the signal is then never answered,
+        // and the pid becomes unkillable by this call or by an external `kill -9` alike (measured:
+        // it does not merely take longer, it does not happen at all). PT_DETACH is a harmless,
+        // ignored-on-failure no-op when pid was never ptrace-attached in the first place -- e.g.
+        // a child Init() launched but whose Start() never ran -- so this is always the right thing
+        // to call before killing a child this class knows about, not only after a live Start().
+        // Returns false only if the kill() itself failed (e.g. the pid was already gone);
+        // *exitCode mirrors WaitForRealExit()'s.
+        static bool DetachAndKill(pid_t pid, int* exitCode);
     };
 }

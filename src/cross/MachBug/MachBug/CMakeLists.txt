@@ -24,11 +24,16 @@ project(MachBug
 )
 
 # Target: MachBug
+set(CMKR_TARGET MachBug)
+include("../cmake/MachBugMig.cmake")
+
 set(MachBug_SOURCES
 	"api/machbug_api.h"
 	cmake.toml
+	"core/Debugger.Loop.cpp"
 	"core/Debugger.cpp"
 	"core/Debugger.h"
+	"core/ExceptionServer.cpp"
 	"process/Process.cpp"
 	"process/Process.h"
 	"types/Global.h"
@@ -46,4 +51,9 @@ target_compile_features(MachBug PUBLIC
 
 target_include_directories(MachBug PUBLIC
 	"../"
+)
+
+target_link_libraries(MachBug PUBLIC
+	machbug_mig
+	Threads::Threads
 )

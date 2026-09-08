@@ -54,6 +54,7 @@ required=(
     src/cross/MachBug/cmake/MachBugMigStubs.c
     src/cross/MachBug/tests/targets/no_get_task_allow.cpp
     src/cross/MachBug/tests/debugger_launch.cpp
+    src/cross/MachBug/tests/exception_loop.cpp
     src/cross/MachBug/MachBug/cmake.toml
     src/cross/MachBug/MachBug/CMakeLists.txt
     src/cross/MachBug/MachBug/types/MachBug.h
@@ -62,6 +63,8 @@ required=(
     src/cross/MachBug/MachBug/process/Process.cpp
     src/cross/MachBug/MachBug/core/Debugger.h
     src/cross/MachBug/MachBug/core/Debugger.cpp
+    src/cross/MachBug/MachBug/core/Debugger.Loop.cpp
+    src/cross/MachBug/MachBug/core/ExceptionServer.cpp
     src/cross/CMakePresets.json
     src/cross/CMakeLists.txt
 )

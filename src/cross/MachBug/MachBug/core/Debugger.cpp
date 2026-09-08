@@ -12,6 +12,11 @@
 // explicit envp argument, which needs this to pass the parent's own environment through.
 extern char** environ;
 
+// Init()/Terminate()/spawnSuspended() live in this file, unchanged since Task 3 -- they only
+// launch the child and hold its pid/task port. Start(), Continue(), StepInto(), Pause(), Stop(),
+// handleException() and the receive loop they share are in Debugger.Loop.cpp; the MIG entry
+// point that calls into handleException() is in ExceptionServer.cpp. See the class comment in
+// Debugger.h for why the loop cannot be shaped like ElfBug's debugLoop()/waitpid().
 namespace MachBug
 {
     Debugger::Debugger() = default;
@@ -132,12 +137,14 @@ namespace MachBug
         const pid_t pid = mProcess->pid;
         mProcess.reset();
 
-        if(kill(pid, SIGKILL) != 0)
-            return false;
-
-        int status = 0;
-        waitpid(pid, &status, 0);
-        return true;
+        // Process::DetachAndKill(), not a bare kill()+waitpid(): if Start() ran, this pid is
+        // ptrace(PT_ATTACHEXC)'d (Debugger.Loop.cpp::Start()) -- possibly still, if Start()'s own
+        // loop ended some other way than Stop() (an unexpected mach_msg failure, say) without
+        // ever tearing that down. A plain SIGKILL sent to a still-attached pid is routed through
+        // its Mach exception port exactly like any other signal, and with nothing left to service
+        // that port, is never answered -- the pid does not die, at all, not even slower. See that
+        // helper's comment in Process.h for the measured failure mode this once was.
+        return Process::DetachAndKill(pid, nullptr);
     }
 
     void Debugger::cbInternalError(const std::string & error) { (void)error; }
