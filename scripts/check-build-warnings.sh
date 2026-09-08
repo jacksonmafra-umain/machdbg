@@ -12,6 +12,12 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 TEMP_BUILD="$(mktemp -d)"
 trap "rm -rf '$TEMP_BUILD'" EXIT
 
+# A fixed log path is overwritten by the very next run, destroying the evidence a surprising
+# result needs to be investigated. Give each invocation its own path — and, unlike TEMP_BUILD,
+# do not delete it on exit; it is meant to outlive this run.
+LOG_FILE="$(mktemp /tmp/build_warnings.log.XXXXXX)"
+echo "Full build log: $LOG_FILE"
+
 cd "$REPO_ROOT/src/cross"
 
 echo "Building into temporary directory: $TEMP_BUILD"
@@ -23,11 +29,11 @@ cmake --preset macos-arm64 -B "$TEMP_BUILD" >/dev/null
 
 echo "Building all four targets (hex_viewer, minidump, remote_table, release_notes)..."
 cmake --build "$TEMP_BUILD" --target hex_viewer minidump remote_table release_notes 2>&1 \
-  | tee /tmp/build_warnings.log >/dev/null
+  | tee "$LOG_FILE" >/dev/null
 
 # Extract libraries from warnings
 echo "Analyzing warnings..."
-WARNINGS=$(grep -o "linking with dylib '[^']*'" /tmp/build_warnings.log | sed "s/.*\/\([^/]*\)\.framework.*/\1/" | sort -u || true)
+WARNINGS=$(grep -o "linking with dylib '[^']*'" "$LOG_FILE" | sed "s/.*\/\([^/]*\)\.framework.*/\1/" | sort -u || true)
 
 # Expected libraries
 EXPECTED="QtSvg
@@ -79,4 +85,6 @@ echo "Observed:"
 if [ -n "$ACTUAL" ]; then printf '%s\n' "$ACTUAL" | sed 's/^/  /'; else echo "  (none)"; fi
 echo "Expected:"
 printf '%s\n' "$EXPECTED" | sed 's/^/  /'
+echo ""
+echo "Full build log kept at: $LOG_FILE"
 exit 1
