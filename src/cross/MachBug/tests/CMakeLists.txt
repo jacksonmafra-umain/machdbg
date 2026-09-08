@@ -303,14 +303,12 @@ add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
 )
 
 # Target: MachBug_tests
-set(CMKR_TARGET MachBug_tests)
-include("../cmake/MachBugMig.cmake")
-
 set(MachBug_tests_SOURCES
 	api_contract.cpp
 	api_contract_c.c
 	cmake.toml
 	debugger_launch.cpp
+	exception_loop.cpp
 	mig_exception_server.cpp
 	targets_signed.cpp
 )
@@ -348,6 +346,7 @@ if(NOT CMKR_VS_STARTUP_PROJECT)
 	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT MachBug_tests)
 endif()
 
+set(CMKR_TARGET MachBug_tests)
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 catch_discover_tests(MachBug_tests)
