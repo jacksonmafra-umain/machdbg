@@ -52,8 +52,10 @@ required=(
     src/cross/MachBug/tests/mig_exception_server.cpp
     src/cross/MachBug/cmake/MachBugMig.cmake
     src/cross/MachBug/cmake/MachBugMigStubs.c
+    src/cross/MachBug/tests/targets/no_get_task_allow.cpp
     src/cross/MachBug/tests/debugger_launch.cpp
     src/cross/MachBug/MachBug/cmake.toml
+    src/cross/MachBug/MachBug/CMakeLists.txt
     src/cross/MachBug/MachBug/types/MachBug.h
     src/cross/MachBug/MachBug/types/Global.h
     src/cross/MachBug/MachBug/process/Process.h
