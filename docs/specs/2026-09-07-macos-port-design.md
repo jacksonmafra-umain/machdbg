@@ -382,11 +382,35 @@ code signature invalidation never arises.
 
 ## 9. Signing, entitlements, SIP and patching
 
+### Corrected: what `task_for_pid` actually requires (measured, milestone 2 task 1)
+
+This section originally claimed `com.apple.security.cs.debugger` on an Apple-issued identity was
+required before `task_for_pid` would work at all. That is wrong for the case this milestone's
+tests depend on, and it was measured rather than assumed:
+
+| Caller | Target | Result |
+|---|---|---|
+| Ad-hoc signed, no debugger entitlement | Ad-hoc signed **with** `get-task-allow` | `task_for_pid` succeeds |
+| Ad-hoc signed, no debugger entitlement | Ad-hoc signed **without** `get-task-allow` | `KERN_FAILURE` (5) |
+| Ad-hoc signed, no debugger entitlement | System binary, hardened runtime | `KERN_FAILURE` (5) |
+
+The rule this measurement establishes: **`get-task-allow` on the target is what `task_for_pid`
+needs from a same-user caller.** A caller with no debugger entitlement at all reaches any target
+that carries it. `com.apple.security.cs.debugger` (Apple-issued identity required, see below) is
+not the price of entry for our own fixtures — it is what buys a caller access to targets that did
+*not* opt in: third-party apps, hardened-runtime binaries, anything the debugger does not build
+and sign itself. Milestone 2's engine tests build and sign their own targets with
+`get-task-allow` (`src/cross/MachBug/tests/targets.entitlements`), so they need none of the
+machinery below to pass; the Apple-issued identity is only load-bearing once machdbg has to
+attach to processes it did not launch.
+
 ### The debugger's own signature
 
-`task_for_pid` requires `com.apple.security.cs.debugger`. That entitlement is honoured only for
-a binary signed with an Apple-issued identity; an ad-hoc signature (`codesign -s -`) does not
-qualify. The user must also be in the `_developer` group, via `DevToolsSecurity -enable`.
+`com.apple.security.cs.debugger` is honoured only for a binary signed with an Apple-issued
+identity; an ad-hoc signature (`codesign -s -`) does not qualify. It is what lets the debugger
+attach to targets that never opted in themselves — a third-party app, a hardened-runtime binary,
+anything without `get-task-allow`. The user must also be in the `_developer` group, via
+`DevToolsSecurity -enable`.
 
 `packaging/sign.sh` therefore does three things: locates an identity with
 `security find-identity -v -p codesigning`, fails with a named instruction if there is none, and
@@ -401,8 +425,8 @@ mode.
 
 | Target | Result |
 |---|---|
-| Built by the user, carries `get-task-allow` | Works |
-| Third-party notarised app with hardened runtime | Not attachable; only a re-signed copy is |
+| Built by the user, carries `get-task-allow` | Works — from any caller, even one with no debugger entitlement |
+| Third-party notarised app with hardened runtime | Not attachable; only a re-signed copy is, or a caller holding `com.apple.security.cs.debugger` on an Apple-issued identity |
 | Apple binary protected by SIP | Out of reach while SIP is enabled |
 | Any target with SIP disabled | More becomes reachable — the user's choice, never our requirement |
 
@@ -495,10 +519,14 @@ itself here — plus the token emitter, the fixup parser and the vendored expres
 No process, no signing, runs on any runner.
 
 **Engine integration.** Small C targets mirroring `ElfBug/tests/targets/*`, launched under
-MachBug. The obstacle is that `task_for_pid` needs an entitlement, which needs an Apple-issued
-certificate, which CI does not have. The resolution is to run engine tests as root: root does not
-need the entitlement for a non-restricted target. It is not elegant, but the alternative is
-distributing a private key to CI.
+MachBug. This section originally claimed CI would have to run engine tests as root, on the
+premise that `task_for_pid` needs an Apple-issued certificate that CI does not have. That premise
+was wrong (see §9's correction, measured in milestone 2 task 1): a target the test suite builds
+and ad-hoc signs with `com.apple.security.get-task-allow`
+(`src/cross/MachBug/tests/targets.entitlements`) is reachable by an ordinary, unprivileged,
+ad-hoc-signed caller with no debugger entitlement at all. No root, and no Apple-issued identity,
+is needed for our own fixtures. CI proves this directly: `.github/workflows/macos.yml` builds and
+runs `MachBug_tests` as the default runner user.
 
 **GUI smoke.** Launch the `.app` and capture a screenshot. This is the milestone 1 proof.
 

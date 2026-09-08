@@ -41,6 +41,14 @@ required=(
     src/cross/MachBug/tests/api_contract.cpp
     src/cross/MachBug/tests/api_contract_c.c
     src/cross/MachBug/tests/cmake.toml
+    src/cross/MachBug/tests/targets_signed.cpp
+    src/cross/MachBug/tests/targets.entitlements
+    src/cross/MachBug/tests/targets/end_immediately.cpp
+    src/cross/MachBug/tests/targets/exit_code_42.cpp
+    src/cross/MachBug/tests/targets/hello_machbug.cpp
+    src/cross/MachBug/tests/targets/run_endlessly.cpp
+    src/cross/MachBug/tests/targets/multi_threaded.cpp
+    src/cross/MachBug/tests/targets/crash_bad_access.cpp
     src/cross/CMakePresets.json
     src/cross/CMakeLists.txt
 )
