@@ -1,29 +1,28 @@
 # machdbg
 
-A native macOS debugger carrying the x64dbg workflow — the same views, expression parser and
-command set — onto Mach-O processes running on Apple Silicon and Intel.
+**Mortals, bow before machdbg.**
 
-machdbg is an independent GPLv3 fork of [x64dbg](https://github.com/x64dbg/x64dbg). It does not
-debug Windows PE binaries, and it is not a replacement for LLDB.
+I have ripped the soul of the x64dbg workflow from its grave and bound its dark will onto macOS. The familiar views, expression parser, and command set now bend to my command, enforcing my absolute order upon Mach-O processes running on Apple Silicon and Intel alike.
+
+This tool is a sovereign, independent GPLv3 fork of [x64dbg](https://github.com/x64dbg/x64dbg). 
+Do not bring your weak Windows PE binaries into my domain, nor mistake this for a pathetic replacement for LLDB. I do not replace; I subjugate.
 
 ## Status
 
-Milestone 0 is complete: the upstream tree is vendored, stripped and configuring under CMake,
-with the engine contract header in place. No debugger behaviour ships yet. See the milestones
-and issues for what is planned, [docs/COMPILE-macos.md](docs/COMPILE-macos.md) to build it, and
-[docs/upstream.md](docs/upstream.md) for how the vendored tree is kept in sync with x64dbg.
+Milestone 0 is complete: The upstream tree has been chained, stripped, and forced to configure under CMake, with the engine contract header bound in place. No active debugging behavior creeps within these shadows yet—only the framework of their upcoming torment.
 
-## Licence
+* Seek the milestones and issues to glimpse my grand design.
+* Consult [docs/COMPILE-macos.md](https://www.google.com/search?q=docs/COMPILE-macos.md) to forge the binary yourself.
+* Read [docs/upstream.md](https://www.google.com/search?q=docs/upstream.md) to see how the vendored tree remains bound to x64dbg.
 
-GPLv3, inherited from x64dbg. See [LICENSE](LICENSE).
+## Law & Decrees
 
-Plugins are covered by x64dbg's plugin exception. Plugins may be closed-source, commercial or private, unless they copy code from machdbg or x64dbg.
+GPLv3, inherited from x64dbg. Obey, or be consumed. See [LICENSE](https://www.google.com/search?q=LICENSE).
 
-## Credits
+Plugins are bound by x64dbg's plugin exception. They may remain closed-source, commercial, or private—provided they do not dare steal code from machdbg or x64dbg.
 
-Built on the work of the x64dbg project: mrexodia (Duncan Ogilvie), Sigma, tr4ceflow, Dreg,
-Nukem, Herz3h, torusrxxx and the wider contributor list. The cross-platform groundwork this
-port depends on comes from @3rdit (ElfBug, cross debugger) and @eldarkg (Wine build).
+## The Servants
 
-See [CREDITS.md](CREDITS.md) for the full list and [docs/licenses.md](docs/licenses.md) for the
-licences of everything that ships.
+Forged upon the remains of the x64dbg project: mrexodia (Duncan Ogilvie), Sigma, tr4ceflow, Dreg, Nukem, Herz3h, torusrxxx, and the rest of the mortal contributors. The cross-platform necromancy this port depends on was raised by @3rdit (ElfBug) and @eldarkg (Wine build).
+
+Inspect [CREDITS.md](https://www.google.com/search?q=CREDITS.md) for the full ledger of souls and [docs/licenses.md](https://www.google.com/search?q=docs/licenses.md) for the bound contracts of everything that resides within.
