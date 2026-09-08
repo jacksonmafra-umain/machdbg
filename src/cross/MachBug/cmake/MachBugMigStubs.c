@@ -23,10 +23,22 @@
  * linker picks, and this fallback is never reached. Do not remove the weak
  * one here without confirming a strong definition is linked everywhere
  * machbug_mig is used.
+ *
+ * THE TRAP: a C++ override of this symbol MUST be declared `extern "C"`.
+ * mach_exc.h has no extern "C" guard around the catch_* prototypes, so a
+ * plain C++ definition (the natural thing to write inside MachBug::Debugger,
+ * a C++ class) gets its name mangled. A mangled strong symbol does not match
+ * this weak C symbol, so the linker has nothing to complain about -- it
+ * silently keeps this weak stub instead. The result is a debugger that
+ * builds, links and runs, but returns KERN_FAILURE for every exception
+ * forever. The fallback below writes to stderr the first time it is
+ * reached specifically so that failure is loud instead of silent.
  */
 
 #include <mach/exception_types.h>
 #include <mach/mach.h>
+#include <pthread.h>
+#include <stdio.h>
 
 kern_return_t catch_mach_exception_raise(
     mach_port_t exception_port,
@@ -68,6 +80,16 @@ kern_return_t catch_mach_exception_raise_state(
     return KERN_FAILURE;
 }
 
+static void mach_bug_mig_warn_state_identity_stub_reached(void)
+{
+    fprintf(stderr,
+        "MachBug: the weak MIG stub for catch_mach_exception_raise_state_identity was "
+        "reached -- no strong definition was linked, so every exception will be reported "
+        "as KERN_FAILURE. If the real handler is C++, it must be declared extern \"C\": "
+        "mach_exc.h has no extern \"C\" guard, so a plain C++ definition gets its name "
+        "mangled and silently fails to override this weak C symbol.\n");
+}
+
 __attribute__((weak))
 kern_return_t catch_mach_exception_raise_state_identity(
     mach_port_t exception_port,
@@ -82,6 +104,11 @@ kern_return_t catch_mach_exception_raise_state_identity(
     thread_state_t new_state,
     mach_msg_type_number_t* new_stateCnt)
 {
+    // Printed once, not on every message: an exception loop can be hot, and
+    // once is already enough for a person reading a test failure to notice.
+    static pthread_once_t warned_once = PTHREAD_ONCE_INIT;
+    pthread_once(&warned_once, mach_bug_mig_warn_state_identity_stub_reached);
+
     (void)exception_port;
     (void)thread;
     (void)task;
