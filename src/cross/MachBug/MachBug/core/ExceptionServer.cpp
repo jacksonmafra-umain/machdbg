@@ -45,11 +45,17 @@ extern "C" kern_return_t catch_mach_exception_raise_state_identity(
     (void)old_state;
     (void)old_stateCnt;
 
-    // THREAD_STATE_NONE was the flavor requested at task_set_exception_ports() time, so MIG
-    // allocates no room in the reply for a modified thread state; satisfy the out-parameter
-    // contract without touching it. Thread state changes (single-stepping) go through
-    // thread_get_state()/thread_set_state() directly on `thread` instead -- see setSingleStep()
-    // in Debugger.Loop.cpp.
+    // task_set_exception_ports() (Debugger.Loop.cpp::Start()) requests a real state flavor --
+    // EXCEPTION_STATE_IDENTITY requires one; THREAD_STATE_NONE is only valid for
+    // EXCEPTION_DEFAULT and silently prevents delivery entirely if paired with a state-carrying
+    // behavior like this one (see that call site's comment). old_state/old_stateCnt above are
+    // simply not read: this loop has no present need for the register state a *_STATE_IDENTITY
+    // message optionally carries, so it goes unused rather than unrequested. new_stateCnt = 0
+    // tells the kernel the reply carries no replacement state, i.e. leave the thread's state
+    // exactly as it was reported -- this is valid regardless of what flavor old_state was
+    // delivered in. Thread state changes (single-stepping) instead go through
+    // thread_get_state()/thread_set_state() directly on `thread` -- see setSingleStep() in
+    // Debugger.Loop.cpp.
     if(new_stateCnt)
         *new_stateCnt = 0;
 
