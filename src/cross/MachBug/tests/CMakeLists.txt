@@ -41,17 +41,248 @@ FetchContent_Declare(Catch2
 )
 FetchContent_MakeAvailable(Catch2)
 
+# Target: machbug_fixture_end_immediately
+set(machbug_fixture_end_immediately_SOURCES
+	cmake.toml
+	"targets/end_immediately.cpp"
+)
+
+add_executable(machbug_fixture_end_immediately)
+
+target_sources(machbug_fixture_end_immediately PRIVATE ${machbug_fixture_end_immediately_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${machbug_fixture_end_immediately_SOURCES})
+
+target_compile_options(machbug_fixture_end_immediately PRIVATE
+	-g
+	-O0
+)
+
+set_target_properties(machbug_fixture_end_immediately PROPERTIES
+	OUTPUT_NAME
+		end_immediately
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT machbug_fixture_end_immediately)
+endif()
+
+set(CMKR_TARGET machbug_fixture_end_immediately)
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - --entitlements
+            "${CMAKE_CURRENT_SOURCE_DIR}/targets.entitlements"
+            "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
+)
+
+# Target: machbug_fixture_exit_code_42
+set(machbug_fixture_exit_code_42_SOURCES
+	cmake.toml
+	"targets/exit_code_42.cpp"
+)
+
+add_executable(machbug_fixture_exit_code_42)
+
+target_sources(machbug_fixture_exit_code_42 PRIVATE ${machbug_fixture_exit_code_42_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${machbug_fixture_exit_code_42_SOURCES})
+
+target_compile_options(machbug_fixture_exit_code_42 PRIVATE
+	-g
+	-O0
+)
+
+set_target_properties(machbug_fixture_exit_code_42 PROPERTIES
+	OUTPUT_NAME
+		exit_code_42
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT machbug_fixture_exit_code_42)
+endif()
+
+set(CMKR_TARGET machbug_fixture_exit_code_42)
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - --entitlements
+            "${CMAKE_CURRENT_SOURCE_DIR}/targets.entitlements"
+            "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
+)
+
+# Target: machbug_fixture_hello_machbug
+set(machbug_fixture_hello_machbug_SOURCES
+	cmake.toml
+	"targets/hello_machbug.cpp"
+)
+
+add_executable(machbug_fixture_hello_machbug)
+
+target_sources(machbug_fixture_hello_machbug PRIVATE ${machbug_fixture_hello_machbug_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${machbug_fixture_hello_machbug_SOURCES})
+
+target_compile_options(machbug_fixture_hello_machbug PRIVATE
+	-g
+	-O0
+)
+
+set_target_properties(machbug_fixture_hello_machbug PROPERTIES
+	OUTPUT_NAME
+		hello_machbug
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT machbug_fixture_hello_machbug)
+endif()
+
+set(CMKR_TARGET machbug_fixture_hello_machbug)
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - --entitlements
+            "${CMAKE_CURRENT_SOURCE_DIR}/targets.entitlements"
+            "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
+)
+
+# Target: machbug_fixture_run_endlessly
+set(machbug_fixture_run_endlessly_SOURCES
+	cmake.toml
+	"targets/run_endlessly.cpp"
+)
+
+add_executable(machbug_fixture_run_endlessly)
+
+target_sources(machbug_fixture_run_endlessly PRIVATE ${machbug_fixture_run_endlessly_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${machbug_fixture_run_endlessly_SOURCES})
+
+target_compile_options(machbug_fixture_run_endlessly PRIVATE
+	-g
+	-O0
+)
+
+set_target_properties(machbug_fixture_run_endlessly PROPERTIES
+	OUTPUT_NAME
+		run_endlessly
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT machbug_fixture_run_endlessly)
+endif()
+
+set(CMKR_TARGET machbug_fixture_run_endlessly)
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - --entitlements
+            "${CMAKE_CURRENT_SOURCE_DIR}/targets.entitlements"
+            "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
+)
+
+# Target: machbug_fixture_multi_threaded
+set(machbug_fixture_multi_threaded_SOURCES
+	cmake.toml
+	"targets/multi_threaded.cpp"
+)
+
+add_executable(machbug_fixture_multi_threaded)
+
+target_sources(machbug_fixture_multi_threaded PRIVATE ${machbug_fixture_multi_threaded_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${machbug_fixture_multi_threaded_SOURCES})
+
+target_compile_options(machbug_fixture_multi_threaded PRIVATE
+	-g
+	-O0
+)
+
+target_link_libraries(machbug_fixture_multi_threaded PRIVATE
+	Threads::Threads
+)
+
+set_target_properties(machbug_fixture_multi_threaded PROPERTIES
+	OUTPUT_NAME
+		multi_threaded
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT machbug_fixture_multi_threaded)
+endif()
+
+set(CMKR_TARGET machbug_fixture_multi_threaded)
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - --entitlements
+            "${CMAKE_CURRENT_SOURCE_DIR}/targets.entitlements"
+            "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
+)
+
+# Target: machbug_fixture_crash_bad_access
+set(machbug_fixture_crash_bad_access_SOURCES
+	cmake.toml
+	"targets/crash_bad_access.cpp"
+)
+
+add_executable(machbug_fixture_crash_bad_access)
+
+target_sources(machbug_fixture_crash_bad_access PRIVATE ${machbug_fixture_crash_bad_access_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${machbug_fixture_crash_bad_access_SOURCES})
+
+target_compile_options(machbug_fixture_crash_bad_access PRIVATE
+	-g
+	-O0
+)
+
+set_target_properties(machbug_fixture_crash_bad_access PROPERTIES
+	OUTPUT_NAME
+		crash_bad_access
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT machbug_fixture_crash_bad_access)
+endif()
+
+set(CMKR_TARGET machbug_fixture_crash_bad_access)
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - --entitlements
+            "${CMAKE_CURRENT_SOURCE_DIR}/targets.entitlements"
+            "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
+)
+
 # Target: MachBug_tests
 set(MachBug_tests_SOURCES
 	api_contract.cpp
 	api_contract_c.c
 	cmake.toml
+	targets_signed.cpp
 )
 
 add_executable(MachBug_tests)
 
 target_sources(MachBug_tests PRIVATE ${MachBug_tests_SOURCES})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${MachBug_tests_SOURCES})
+
+target_compile_definitions(MachBug_tests PRIVATE
+	"MACHBUG_TESTS_TARGETS_DIR=\"${CMAKE_BINARY_DIR}/tests/targets\""
+)
 
 target_compile_features(MachBug_tests PRIVATE
 	cxx_std_17
@@ -79,3 +310,14 @@ set(CMKR_TARGET MachBug_tests)
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 catch_discover_tests(MachBug_tests)
+
+# The targets_signed test reads these fixtures off disk, so building the test binary alone
+# (as CI does: `cmake --build ... --target MachBug_tests`) must build and sign them too.
+add_dependencies(MachBug_tests
+    machbug_fixture_end_immediately
+    machbug_fixture_exit_code_42
+    machbug_fixture_hello_machbug
+    machbug_fixture_run_endlessly
+    machbug_fixture_multi_threaded
+    machbug_fixture_crash_bad_access
+)

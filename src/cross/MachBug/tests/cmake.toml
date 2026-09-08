@@ -12,15 +12,77 @@ git = "https://github.com/catchorg/Catch2"
 tag = "v3.14.0"
 shallow = true
 
+# macOS-specific step ElfBug_tests' elfbug_fixture template does not need: an ad-hoc signature
+# alone does not satisfy task_for_pid, and a fixture relinked by a later build loses whatever
+# signature it had. Signing runs as a POST_BUILD command on every fixture target so it reapplies
+# on every rebuild, not just the first one.
+[template.machbug_fixture]
+type = "executable"
+compile-options = ["-g", "-O0"]
+cmake-after = """
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - --entitlements
+            "${CMAKE_CURRENT_SOURCE_DIR}/targets.entitlements"
+            "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
+)
+"""
+
+[target.machbug_fixture_end_immediately]
+type = "machbug_fixture"
+sources = ["targets/end_immediately.cpp"]
+properties.OUTPUT_NAME = "end_immediately"
+
+[target.machbug_fixture_exit_code_42]
+type = "machbug_fixture"
+sources = ["targets/exit_code_42.cpp"]
+properties.OUTPUT_NAME = "exit_code_42"
+
+[target.machbug_fixture_hello_machbug]
+type = "machbug_fixture"
+sources = ["targets/hello_machbug.cpp"]
+properties.OUTPUT_NAME = "hello_machbug"
+
+[target.machbug_fixture_run_endlessly]
+type = "machbug_fixture"
+sources = ["targets/run_endlessly.cpp"]
+properties.OUTPUT_NAME = "run_endlessly"
+
+[target.machbug_fixture_multi_threaded]
+type = "machbug_fixture"
+sources = ["targets/multi_threaded.cpp"]
+link-libraries = ["Threads::Threads"]
+properties.OUTPUT_NAME = "multi_threaded"
+
+[target.machbug_fixture_crash_bad_access]
+type = "machbug_fixture"
+sources = ["targets/crash_bad_access.cpp"]
+properties.OUTPUT_NAME = "crash_bad_access"
+
 [target.MachBug_tests]
 type = "executable"
-sources = ["api_contract.cpp", "api_contract_c.c"]
+sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp"]
 compile-features = ["cxx_std_17"]
 include-directories = ["../"]
 link-libraries = ["Catch2::Catch2WithMain"]
+compile-definitions = ['MACHBUG_TESTS_TARGETS_DIR="${CMAKE_BINARY_DIR}/tests/targets"']
 properties.RUNTIME_OUTPUT_DIRECTORY = "${CMAKE_BINARY_DIR}/tests"
 cmake-after = """
 list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
 include(Catch)
 catch_discover_tests(MachBug_tests)
+
+# The targets_signed test reads these fixtures off disk, so building the test binary alone
+# (as CI does: `cmake --build ... --target MachBug_tests`) must build and sign them too.
+add_dependencies(MachBug_tests
+    machbug_fixture_end_immediately
+    machbug_fixture_exit_code_42
+    machbug_fixture_hello_machbug
+    machbug_fixture_run_endlessly
+    machbug_fixture_multi_threaded
+    machbug_fixture_crash_bad_access
+)
 """
