@@ -1,0 +1,19 @@
+# Reference: https://build-cpp.github.io/cmkr/cmake-toml
+#
+# Unlike ElfBug -- whose static library target is declared inline in src/cross/cmake.toml,
+# because upstream vendored it that way -- MachBug is authored code and gets its own manifest,
+# one directory per concern, matching the process/core/types split inside it.
+[cmake]
+version = "3.19"
+cmkr-include = false
+
+[project]
+name = "MachBug"
+languages = ["CXX"]
+
+[target.MachBug]
+type = "static"
+sources = ["process/*.cpp", "core/*.cpp"]
+headers = ["types/*.h", "process/*.h", "core/*.h", "api/*.h"]
+compile-features = ["cxx_std_17"]
+include-directories = ["../"]
