@@ -16,6 +16,14 @@ namespace MachBug
     // ElfBug::Debugger's virtual callback surface do not exist on this class. Task 4 adds the
     // mach_msg receive loop and the callbacks it needs to report through; this class is
     // deliberately not yet ElfBug-complete.
+    //
+    // Undeclared-until-now divergence, noted here since it was not called out earlier: where
+    // ElfBug::Debugger tracks its children in an unordered_map<pid_t, Process> (multiple
+    // tracees under one Debugger), this class holds a single unique_ptr<Process>. That is a
+    // deliberate simplification for a single-target debugger, not an oversight -- nothing in
+    // this milestone attaches to more than one process at a time -- but it means this class
+    // cannot yet track multiple children the way ElfBug's map shape implies it eventually will.
+    // Revisit if/when multi-process debugging becomes a requirement.
     class Debugger
     {
     public:
