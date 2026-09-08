@@ -140,8 +140,13 @@ namespace MachBug
         if(kill(pid, SIGKILL) != 0)
             return false;
 
-        int status = 0;
-        waitpid(pid, &status, 0);
+        // Process::WaitForRealExit(), not a bare waitpid(): if Start() ran (and therefore
+        // ptrace(PT_ATTACHEXC)'d this pid -- see Debugger.Loop.cpp::Start()), a single un-looped
+        // waitpid() call here can pick up a queued ptrace stop notification instead of the
+        // termination this SIGKILL is meant to confirm, and a stop status miscomputed as an exit
+        // code is the least of it -- see that helper's comment for the actual failure mode this
+        // once was: the process staying alive, unreaped, with this call believing it was done.
+        Process::WaitForRealExit(pid, nullptr);
         return true;
     }
 

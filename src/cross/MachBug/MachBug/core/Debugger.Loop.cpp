@@ -165,6 +165,18 @@ namespace MachBug
             return false;
         }
 
+        // A fresh Init() launching a new child after a previous one's Start() ended (naturally,
+        // or via Stop()) is the normal way to reuse a Debugger object, and every run of this loop
+        // needs to begin without the previous one's bookkeeping still attached -- most pointedly
+        // mStopRequested, which Stop() sets permanently and nothing previously cleared: a second
+        // Start() after a Stop()'d first one would otherwise see it already true and return
+        // (by way of exceptionLoop()'s own top-of-loop check) before installing a single port.
+        mStopRequested.store(false, std::memory_order_release);
+        mStopped.store(false, std::memory_order_release);
+        mPausedByUser.store(false, std::memory_order_release);
+        mSeenFirstStop = false;
+        mStepArmed = false;
+
         // task_set_exception_ports() alone only ever catches an exception the target's own
         // execution triggers directly (a hardware fault, a trap instruction) -- it has no effect
         // on ordinary BSD signal delivery to the child. Without this call, a completely
@@ -326,12 +338,20 @@ namespace MachBug
                 // not an attach), so waitpid(WNOHANG) is a direct, reliable answer -- no
                 // EXC_CRASH synthesis or dead-name/proc-exit notification needed for a debugger
                 // that already owns the pid.
+                //
+                // waited > 0 alone is not enough, though: this pid was ptrace(PT_ATTACHEXC)'d
+                // above (see Start()), and a traced child reports ordinary ptrace stops through
+                // waitpid() too -- for instance while a thread is parked on an unanswered
+                // exception reply, which is not a rare timing accident here, it is this loop's
+                // own normal operation. Treating any waitpid() return as an exit, unconditionally,
+                // computed a bogus exit code from a WIFSTOPPED status (WIFEXITED false ->
+                // -WTERMSIG() of whatever bits happen to be set) and announced a live target as
+                // dead. Process::IsRealExit() is the predicate that was missing.
                 int status = 0;
                 const pid_t waited = mProcess ? waitpid(mProcess->pid, &status, WNOHANG) : -1;
-                if(waited > 0)
+                if(waited > 0 && Process::IsRealExit(status))
                 {
-                    const int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -WTERMSIG(status);
-                    cbExitProcessEvent(exitCode);
+                    cbExitProcessEvent(Process::ExitCodeFromStatus(status));
                     break;
                 }
                 continue;
@@ -391,8 +411,11 @@ namespace MachBug
         if(mStopRequested.load(std::memory_order_acquire) && mProcess)
         {
             kill(mProcess->pid, SIGKILL);
-            int status = 0;
-            waitpid(mProcess->pid, &status, 0);
+            // Process::WaitForRealExit(), not a bare waitpid(): this pid was
+            // ptrace(PT_ATTACHEXC)'d (Start(), above), so a single un-looped waitpid() call can
+            // return on a queued ptrace stop notification rather than the death this SIGKILL is
+            // meant to confirm -- see that helper's comment.
+            Process::WaitForRealExit(mProcess->pid, nullptr);
         }
     }
 

@@ -1,6 +1,7 @@
 #include <MachBug/process/Process.h>
 
 #include <mach/mach_error.h>
+#include <sys/wait.h>
 
 namespace MachBug
 {
@@ -57,6 +58,38 @@ namespace MachBug
             }
             return result;
         }
+        }
+    }
+
+    bool Process::IsRealExit(const int status)
+    {
+        return WIFEXITED(status) || WIFSIGNALED(status);
+    }
+
+    int Process::ExitCodeFromStatus(const int status)
+    {
+        return WIFEXITED(status) ? WEXITSTATUS(status) : -WTERMSIG(status);
+    }
+
+    bool Process::WaitForRealExit(const pid_t pid, int* const exitCode)
+    {
+        for(;;)
+        {
+            int status = 0;
+            const pid_t result = waitpid(pid, &status, 0);
+            if(result == -1)
+                return false; // e.g. ECHILD: already reaped, or never existed
+
+            if(IsRealExit(status))
+            {
+                if(exitCode)
+                    *exitCode = ExitCodeFromStatus(status);
+                return true;
+            }
+
+            // WIFSTOPPED: not a termination -- a ptrace-visible stop (PT_ATTACHEXC, see
+            // Debugger.Loop.cpp::Start()) reported through waitpid(), same as IsRealExit()'s
+            // comment describes. Keep waiting for the state change that actually is one.
         }
     }
 }

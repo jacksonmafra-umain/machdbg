@@ -73,15 +73,20 @@ namespace MachBug
         // launched child to terminate.
         bool Terminate();
 
-        // Blocking; owns the exception receive loop for as long as the child lives. Installs
-        // the task's exception ports (EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES, covering
-        // EXC_BREAKPOINT/EXC_BAD_ACCESS/EXC_BAD_INSTRUCTION/EXC_ARITHMETIC/EXC_SOFTWARE) on the
-        // still-suspended task, resumes it, then alternates between waiting for an exception
-        // message and polling for the child's exit -- a clean exit raises no Mach exception, so
-        // waitpid(WNOHANG) is what notices it (this process is the child's real parent via
-        // posix_spawn, so that call is always valid here, unlike in an attach-based debugger).
-        // Returns once the child has exited or Stop() has ended the loop. Requires a prior
-        // successful Init(); call it at most once per launched child.
+        // Blocking; owns the exception receive loop for as long as the child lives. Attaches with
+        // ptrace(PT_ATTACHEXC) (needed so a target that never faults on its own still generates a
+        // first stop -- see Debugger.Loop.cpp's comment), installs the task's exception ports
+        // (EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES, covering EXC_BREAKPOINT/EXC_BAD_ACCESS/
+        // EXC_BAD_INSTRUCTION/EXC_ARITHMETIC/EXC_SOFTWARE) on the still-suspended task, resumes it,
+        // then alternates between waiting for an exception message and polling for the child's
+        // exit -- a clean exit raises no Mach exception, so waitpid(WNOHANG) is what notices it
+        // (this process is the child's real parent via posix_spawn, so that call is always valid
+        // here, unlike in an attach-based debugger; it also has to tell an actual exit apart from
+        // a ptrace stop notification the same PT_ATTACHEXC makes waitpid() report -- see
+        // Process::IsRealExit()). Returns once the child has exited or Stop() has ended the loop.
+        // Requires a prior successful Init(); call it once per launched child -- a fresh Init()
+        // (which a Debugger reused for a new target calls before this) resets the bookkeeping a
+        // second Start() would otherwise still see from the previous one.
         bool Start();
 
         // Thread-safe: intended to be called from a thread other than the one blocked in
@@ -95,9 +100,10 @@ namespace MachBug
         void Stop();
 
         // Thread-safe. Unlike Continue/StepInto/Stop, Pause() does not go through the command
-        // queue: there may be no thread parked in handleException() to hand a decision to (nothing
-        // in this milestone is presently generating exceptions on a free-running target), so
-        // Pause() reaches for task_suspend() directly -- the same primitive SIGSTOP would use on
+        // queue: there may be no thread parked in handleException() to hand a decision to at all
+        // -- a free-running target only ever raises an exception when its own code faults, traps,
+        // or (via PT_ATTACHEXC) receives a signal, none of which Pause() can wait around for -- so
+        // it reaches for task_suspend() directly instead, the same primitive SIGSTOP would use on
         // ElfBug's side, not a signal, since Mach has no signal-based process control. Calling it
         // while already stopped at an exception is a no-op: the target cannot get any less
         // running than that.
