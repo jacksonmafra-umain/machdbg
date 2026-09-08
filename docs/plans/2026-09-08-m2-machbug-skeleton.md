@@ -525,10 +525,20 @@ task_set_exception_ports(
         | EXC_MASK_ARITHMETIC | EXC_MASK_SOFTWARE,
     exceptionPort,
     EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES,
-    THREAD_STATE_NONE);
+    ARM_THREAD_STATE64);   // NOT THREAD_STATE_NONE -- see below
 ```
 
 `MACH_EXCEPTION_CODES` is what makes the codes 64-bit and is why Task 2 used `mach_exc.defs`. `EXCEPTION_STATE_IDENTITY` gives both the thread port and the thread state in one message, which is what a debugger wants.
+
+**The last argument is not optional, and getting it wrong fails silently.** An earlier version of this plan specified `THREAD_STATE_NONE`, which is valid only for `EXCEPTION_DEFAULT`. With a state-carrying behaviour and no flavor, the kernel declines to deliver, says nothing, and the exception falls through to the default handler, which converts it to a signal. The observable result is that `task_set_exception_ports` returns `KERN_SUCCESS`, the target faults for real, and `mach_msg` simply times out — which looks exactly like an environment that forbids exception ports, and cost this milestone a wrong BLOCKED and a CI probe before the constant was suspected.
+
+Measured, in standalone C outside the codebase: with `THREAD_STATE_NONE`, `mach_msg` times out after five seconds and the child dies of `SIGSEGV`. With `ARM_THREAD_STATE64`, `mach_msg` returns success with message id 2407 — `mach_exception_raise_state_identity` — and the child is alive and stopped, held by the unanswered reply.
+
+Milestone 3 brings x86-64 into scope and will need `x86_THREAD_STATE64`, so select the flavor by architecture rather than hardcoding it.
+
+**`task_set_exception_ports` alone is not enough for a target that does not fault.** A process that runs normally never raises an exception, so nothing ever stops. `ptrace(PT_ATTACHEXC, pid, 0, 0)` is what makes the resuming signal itself arrive as an exception on your port — which is how the debugger gets its first stop on a well-behaved program. Install the ports before attaching, so the attach's own stop cannot race a port that does not exist yet.
+
+**A linkage trap sits between this task and Task 2.** The MIG server needs a `catch_mach_exception_raise_state_identity` symbol. If a weak fallback exists in one static archive and your strong definition in another, lazy archive extraction can leave the weak one winning with no diagnostic at all — a debugger that builds, links, runs, and returns `KERN_FAILURE` for every exception. Prefer deleting the weak fallback so a missing strong handler is an undefined-symbol error at build time.
 
 Verify the ports are installed **before** resuming the child from its suspended start.
 
