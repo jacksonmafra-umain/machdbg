@@ -461,17 +461,25 @@ source_png="src/bug.png"
 iconset="$(mktemp -d)/machdbg.iconset"
 mkdir -p "$iconset"
 
-for size in 16 32 128 256 512; do
+# src/bug.png is 256x256, so 256 is the largest honest size and 128@2x is the
+# largest honest retina variant. Asking sips for 512 or 1024 would upscale.
+for size in 16 32 128; do
     sips -z "$size" "$size" "$source_png" --out "$iconset/icon_${size}x${size}.png" >/dev/null
     double=$((size * 2))
     sips -z "$double" "$double" "$source_png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
+sips -z 256 256 "$source_png" --out "$iconset/icon_256x256.png" >/dev/null
 
 iconutil --convert icns "$iconset" --output packaging/machdbg.icns
 rm -rf "$(dirname "$iconset")"
 
 printf 'wrote packaging/machdbg.icns (%s bytes)\n' "$(stat -f%z packaging/machdbg.icns)"
 ```
+
+**On the sizes:** `src/bug.png` is 256x256 — verified, not assumed. macOS iconsets go up to
+1024x1024, but generating those from a 256px source produces a blurred icon that looks worse than
+a smaller sharp one. If you want the larger sizes, the right fix is a larger source image, which
+is out of this milestone's scope. Report the sizes `iconutil` accepted.
 
 - [ ] **Step 5: Generate the icon**
 
@@ -905,7 +913,7 @@ on:
 jobs:
   arm64:
     name: Apple Silicon
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -952,7 +960,7 @@ jobs:
 
   intel:
     name: Intel (answers research question 3)
-    runs-on: macos-13
+    runs-on: macos-15-intel
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -962,8 +970,15 @@ jobs:
           sw_vers
 ```
 
-The Intel job deliberately does nothing but report. Its purpose is to establish whether the image
-still exists at all; building on it is milestone 3's problem, not this one's.
+The Intel job deliberately does nothing but report. Its purpose is to confirm the runner is real
+and record what it is; building on it is milestone 3's problem, not this one's.
+
+**Research question 3 is already partly answered, and the runner labels here reflect it.** The
+image the spec worried about, `macos-13`, is gone. Intel has not gone with it: GitHub's runner
+image list offers `macos-15-intel` and `macos-26-intel` as x64 labels. `macos-14` is deprecated,
+which is why the arm64 job runs on `macos-15`. Verify all of this against the runner-image README
+as your first step rather than trusting these labels — they were read on 2026-09-08 and this is
+exactly the kind of fact that moves.
 
 - [ ] **Step 3: Push the branch and watch the run**
 
