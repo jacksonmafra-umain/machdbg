@@ -36,7 +36,6 @@ message(STATUS "Found ${QT_PACKAGE}: ${${QT_PACKAGE}_DIR}")
 # https://stackoverflow.com/a/41199492/1806760
 # TODO: set VCINSTALLDIR environment variable
 # TODO: move to a custom target you can trigger manually
-# TODO: support macdeployqt
 if(${QT_PACKAGE}_FOUND AND WIN32 AND TARGET ${QT_PACKAGE}::qmake AND NOT TARGET ${QT_PACKAGE}::windeployqt)
     get_target_property(_qt_qmake_location ${QT_PACKAGE}::qmake IMPORTED_LOCATION)
 
@@ -53,6 +52,26 @@ if(${QT_PACKAGE}_FOUND AND WIN32 AND TARGET ${QT_PACKAGE}::qmake AND NOT TARGET 
         add_executable(${QT_PACKAGE}::windeployqt IMPORTED)
 
         set_target_properties(${QT_PACKAGE}::windeployqt PROPERTIES
+            IMPORTED_LOCATION ${imported_location}
+        )
+    endif()
+endif()
+
+if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::qmake AND NOT TARGET ${QT_PACKAGE}::macdeployqt)
+    get_target_property(_qt_qmake_location ${QT_PACKAGE}::qmake IMPORTED_LOCATION)
+
+    execute_process(
+        COMMAND "${_qt_qmake_location}" -query QT_INSTALL_PREFIX
+        RESULT_VARIABLE return_code
+        OUTPUT_VARIABLE qt_install_prefix
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    set(imported_location "${qt_install_prefix}/bin/macdeployqt")
+
+    if(EXISTS ${imported_location})
+        add_executable(${QT_PACKAGE}::macdeployqt IMPORTED)
+        set_target_properties(${QT_PACKAGE}::macdeployqt PROPERTIES
             IMPORTED_LOCATION ${imported_location}
         )
     endif()
@@ -97,6 +116,17 @@ function(qt_executable tgt)
         )
         set_target_properties(${tgt} PROPERTIES
             MACOSX_BUNDLE_ICON_FILE "machdbg.icns"
+        )
+    endif()
+
+    # Run macdeployqt after build to copy the Qt frameworks into the bundle and rewrite
+    # its load commands. Unlike windeployqt below, this needs no once-per-directory guard:
+    # TARGET_BUNDLE_DIR is the target's own <tgt>.app, a directory no other target writes
+    # into, so concurrent macdeployqt runs across the four bundles cannot race each other.
+    if(APPLE AND TARGET ${QT_PACKAGE}::macdeployqt)
+        add_custom_command(TARGET ${tgt} POST_BUILD
+            COMMAND ${QT_PACKAGE}::macdeployqt "$<TARGET_BUNDLE_DIR:${tgt}>" -always-overwrite
+            COMMENT "Running macdeployqt on ${tgt}..."
         )
     endif()
 
