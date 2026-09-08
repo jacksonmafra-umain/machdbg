@@ -15,7 +15,7 @@ if [[ "${MACHDBG_SMOKE_OFFSCREEN:-0}" == "1" ]]; then
     export QT_QPA_PLATFORM=offscreen
 fi
 
-for app in hex_viewer minidump; do
+for app in hex_viewer minidump remote_table release_notes; do
     binary="$build_dir/$app.app/Contents/MacOS/$app"
     if [[ ! -x "$binary" ]]; then
         fail "$app has no executable to launch"
