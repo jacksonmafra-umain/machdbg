@@ -13,7 +13,7 @@ languages = ["CXX"]
 
 [target.MachBug]
 type = "static"
-sources = ["process/*.cpp", "core/*.cpp"]
+sources = ["process/*.cpp", "core/*.cpp", "api/*.cpp"]
 headers = ["types/*.h", "process/*.h", "core/*.h", "api/*.h"]
 compile-features = ["cxx_std_17"]
 include-directories = ["../"]
