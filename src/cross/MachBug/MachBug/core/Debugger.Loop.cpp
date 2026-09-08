@@ -519,12 +519,19 @@ namespace MachBug
     void Debugger::Continue()
     {
         std::lock_guard<std::mutex> lock(mCmdMutex);
+
+        // Independent ifs, not if/else: mStopped (a parked exception reply) and mPausedByUser (a
+        // direct task_suspend()) are two separate reasons the target might not be running, and --
+        // under a race Pause() used to allow (see its own comment) -- could in principle both be
+        // true at once. A single Continue() call clears whichever of them apply, rather than
+        // leaving the other stranded until a second call happens to be made because IsStopped()
+        // still (correctly) said so.
         if(mStopped.load(std::memory_order_acquire))
         {
             mPendingCommand = Command::Continue;
             mCmdCv.notify_all();
         }
-        else if(mPausedByUser.exchange(false, std::memory_order_acq_rel) && mProcess)
+        if(mPausedByUser.exchange(false, std::memory_order_acq_rel) && mProcess)
         {
             // Nothing is parked in handleException() -- the target was free-running when
             // Pause() task_suspended it directly, so undo that the same way, with task_resume().
@@ -548,6 +555,23 @@ namespace MachBug
     {
         if(!mProcess)
             return;
+
+        // The whole check-then-act sequence below holds mCmdMutex so it cannot interleave with
+        // handleException() setting mStopped=true (which happens under the same lock): either
+        // this runs first (sees mStopped false, may go on to task_suspend()) or the exception's
+        // own mStopped=true happens first (this then sees it and returns). Checking mStopped
+        // outside this lock, as an earlier version of this function did, raced exactly that
+        // transition: Pause() could read false, then task_suspend() a target that had, in the
+        // meantime, already become parked at a genuine exception -- suspending an
+        // already-stopped task and setting mPausedByUser regardless.
+        std::lock_guard<std::mutex> lock(mCmdMutex);
+
+        if(mPausedByUser.load(std::memory_order_acquire))
+            return; // already paused -- idempotent, so repeated Pause() calls cannot leave
+                     // task_suspend()'s internal count deeper than the one task_resume() a
+                     // Continue() call will later issue; the alternative (suspending again on
+                     // every call) is exactly the "Pause(); Pause(); Continue();" bug this
+                     // guards against: two suspends, only one resume, permanently stuck.
 
         if(mStopped.load(std::memory_order_acquire))
             return; // already stopped at an exception; nothing more to pause

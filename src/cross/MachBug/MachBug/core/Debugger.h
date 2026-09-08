@@ -104,9 +104,12 @@ namespace MachBug
         // -- a free-running target only ever raises an exception when its own code faults, traps,
         // or (via PT_ATTACHEXC) receives a signal, none of which Pause() can wait around for -- so
         // it reaches for task_suspend() directly instead, the same primitive SIGSTOP would use on
-        // ElfBug's side, not a signal, since Mach has no signal-based process control. Calling it
-        // while already stopped at an exception is a no-op: the target cannot get any less
-        // running than that.
+        // ElfBug's side, not a signal, since Mach has no signal-based process control. Idempotent
+        // (a second Pause() before a Continue() is a no-op, not a second task_suspend()) and, like
+        // Continue()/StepInto()/Stop(), fully serialized against handleException() by mCmdMutex,
+        // so it cannot race a stop that is in the middle of happening. Calling it while already
+        // stopped at an exception is also a no-op: the target cannot get any less running than
+        // that.
         void Pause();
 
         // True once handleException() has parked on the command queue for an unanswered
