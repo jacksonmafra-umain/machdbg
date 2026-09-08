@@ -18,7 +18,7 @@ survive only as Windows-only artifacts that nothing on macOS currently links. Ea
 |---|---|---|
 | machdbg | GPLv3 | Ships — this repository |
 | Qt 6 | LGPLv3 | Ships — runtime dependency (Homebrew for development, the official installer for `macos-universal`) |
-| Capstone | BSD-3-Clause | Build dependency only, verified by `scripts/check-toolchain.sh` (`brew install capstone`); nothing under `src/cross` links it yet |
+| Capstone | BSD-3-Clause | Build dependency only (`brew install capstone`, verified by `scripts/check-toolchain.sh`). The native `src/cross` C++ build does not link it yet; the vendored `src/cross/remote_server` Python prototype lists it as a pip dependency (`capstone>=5.0.6` in its `pyproject.toml`/`uv.lock`), unrelated to that build |
 | asmjit / asmtk | zlib | Not present. Planned for the AArch64 assembler, an open research question for milestone 6 |
 | jansson | MIT | Present only as Windows `.lib` blobs and headers under `src/dbg/jansson`; nothing on macOS links it yet |
 | lz4 | BSD | Present only as Windows `.lib` blobs and headers under `src/dbg/lz4`; nothing on macOS links it yet |
