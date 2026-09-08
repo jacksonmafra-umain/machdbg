@@ -73,6 +73,21 @@ and, for the three files upstream also ships, that the local edit is still prese
   from `src/bug.png` (256x256) by `packaging/make-icns.sh` and is committed, so an ordinary build
   needs neither `sips` nor `iconutil`.
 
+  Task 4 adds the macOS counterpart of the Windows `windeployqt` block, closing the
+  `# TODO: support macdeployqt` comment that sat above it (that line is now deleted, not just
+  left addressed). Beside the existing `WIN32`-gated `${QT_PACKAGE}::windeployqt` imported-target
+  block, a second block gated on `APPLE` locates `qmake` the same way, queries
+  `QT_INSTALL_PREFIX`, and declares `${QT_PACKAGE}::macdeployqt` as an imported executable at
+  `<prefix>/bin/macdeployqt` if that path exists. Inside `qt_executable`'s `APPLE` branch, a
+  `POST_BUILD` `add_custom_command` runs `${QT_PACKAGE}::macdeployqt "$<TARGET_BUNDLE_DIR:${tgt}>"
+  -always-overwrite`, copying the Qt frameworks into `Contents/Frameworks` and rewriting the
+  executable's load commands to `@executable_path`-relative paths. Unlike the Windows
+  `windeployqt` step, this carries no once-per-output-directory guard: `TARGET_BUNDLE_DIR` is
+  always the target's own `<tgt>.app`, a directory no other target writes into, so nothing races
+  the way parallel Windows targets sharing one `RUNTIME_OUTPUT_DIRECTORY` would. Confirmed by
+  inspecting the build tree — each of the four bundles is its own top-level directory under
+  `build/macos-arm64/`, sharing nothing a concurrent `macdeployqt` run could corrupt.
+
 ## Re-syncing
 
 1. Change `UPSTREAM_COMMIT` in `scripts/vendor-upstream.sh` and update the "Pinned commit" row
