@@ -50,6 +50,9 @@ jobs:
       - name: Verify the bundles
         run: ./scripts/check-bundles.sh
 
+      - name: Smoke-launch
+        run: MACHDBG_SMOKE_OFFSCREEN=1 ./scripts/smoke-launch.sh
+
   intel:
     name: Intel (answers research question 3)
     runs-on: macos-15-intel
