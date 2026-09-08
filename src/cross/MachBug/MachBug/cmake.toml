@@ -19,36 +19,28 @@ compile-features = ["cxx_std_17"]
 include-directories = ["../"]
 # MachBugMig.cmake is included (and its machbug_mig target defined) here, in the library that
 # actually implements the exception loop -- not only from tests/cmake.toml, which is where it
-# lived through Task 3 (machbug_mig existed only to prove the generated server linked and to
-# host the weak catch_mach_exception_raise_state_identity stub; nothing in the library itself
-# called into it yet). Debugger.Loop.cpp and ExceptionServer.cpp now #include the generated
-# mach_exc.h and call mach_exc_server()/rely on being linked over the weak stub, so MachBug
-# itself needs machbug_mig's generated header and archive. include-before runs before this
-# target's own add_library() call, so the machbug_mig target it defines exists in time to be
-# listed below in link-libraries. src/cross/CMakeLists.txt adds this subdirectory
-# (MachBug/MachBug) before MachBug/tests, so machbug_mig is already a defined CMake target by
-# the time tests/CMakeLists.txt lists it again in its own link-libraries -- see that file's
-# comment for why it does not also re-include MachBugMig.cmake.
+# lived through Task 3 (machbug_mig existed only to prove the generated server linked; nothing in
+# the library itself called into it yet). Debugger.Loop.cpp and ExceptionServer.cpp now #include
+# the generated mach_exc.h and call mach_exc_server(), so MachBug itself needs machbug_mig's
+# generated header and archive. include-before runs before this target's own add_library() call,
+# so the machbug_mig target it defines exists in time to be listed below in link-libraries.
+# src/cross/CMakeLists.txt adds this subdirectory (MachBug/MachBug) before MachBug/tests, so
+# machbug_mig is already a defined CMake target by the time tests/CMakeLists.txt lists it again in
+# its own link-libraries -- see that file's comment for why it does not also re-include
+# MachBugMig.cmake.
+#
+# A `-Wl,-u,_catch_mach_exception_raise_state_identity` link option briefly lived here (see the
+# task report for why: a lazy, single-pass static linker resolved mach_excServer.c.o's reference
+# to that symbol using MachBugMigStubs.c.o's weak fallback, in the same archive, without ever
+# extracting ExceptionServer.cpp.o's strong definition from libMachBug.a at all). It is gone now
+# because the weak fallback it was working around is gone too -- MachBugMigStubs.c no longer
+# defines catch_mach_exception_raise_state_identity at all (see that file's own comment); a
+# missing or mis-linked strong handler is now a hard undefined-symbol error at build time, which
+# is a better failure mode than either the silent one this once was or a linker flag working
+# around a competing definition that should not exist any more.
 include-before = ["../cmake/MachBugMig.cmake"]
 # Threads::Threads: deferred by Task 3 (its multi_threaded fixture needed it before this library
 # did) -- Debugger.Loop.cpp's command queue is a std::mutex/std::condition_variable, and Start()
 # is documented to run on a caller-owned thread, so this library links pthread explicitly rather
 # than relying on it coming in transitively from something else that happens to.
 link-libraries = ["machbug_mig", "Threads::Threads"]
-# Forces catch_mach_exception_raise_state_identity to be an initially-undefined symbol for any
-# final link that includes MachBug, the same way a real reference from the very first object
-# file would. Without this, a lazy, single-pass static linker (ld64 included) can resolve
-# mach_excServer.c.o's reference to this symbol using MachBugMigStubs.c.o's *weak* fallback --
-# which lives in the same archive (machbug_mig) as mach_excServer.c.o itself -- without ever
-# extracting ExceptionServer.cpp.o's *strong* definition from libMachBug.a at all, if libMachBug.a
-# was already fully scanned earlier in the link line and nothing else in it had asked for this
-# specific symbol yet. That is not a hypothetical: it is exactly what happened building
-# MachBug_tests (libMachBug.a is listed before libmachbug_mig.a) -- the weak stub's one-time
-# stderr warning fired on the very first real exception this loop ever received, meaning the
-# strong handler was never even linked in, silently. `-u` seeds the symbol as wanted from the
-# start of the link, so whichever archive is scanned first that can provide it -- libMachBug.a,
-# with the strong definition -- does, before libmachbug_mig.a's weak fallback is ever consulted.
-# PUBLIC scope (this target's default) is what makes it reach every final executable that links
-# MachBug, not just this project's own test binary; the same lazy-extraction race applies equally
-# to whatever links MachBug for real, later in the milestone.
-link-options = ["-Wl,-u,_catch_mach_exception_raise_state_identity"]
