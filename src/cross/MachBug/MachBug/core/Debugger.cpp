@@ -12,6 +12,11 @@
 // explicit envp argument, which needs this to pass the parent's own environment through.
 extern char** environ;
 
+// Init()/Terminate()/spawnSuspended() live in this file, unchanged since Task 3 -- they only
+// launch the child and hold its pid/task port. Start(), Continue(), StepInto(), Pause(), Stop(),
+// handleException() and the receive loop they share are in Debugger.Loop.cpp; the MIG entry
+// point that calls into handleException() is in ExceptionServer.cpp. See the class comment in
+// Debugger.h for why the loop cannot be shaped like ElfBug's debugLoop()/waitpid().
 namespace MachBug
 {
     Debugger::Debugger() = default;
