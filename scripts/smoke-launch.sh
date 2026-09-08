@@ -22,8 +22,18 @@ for app in hex_viewer minidump remote_table release_notes; do
         continue
     fi
 
+    # release_notes requires a markdown file argument (see its main(), which prints a
+    # usage message and exits immediately without one) -- launching it bare tests only
+    # that we called it wrong, not whether it works. README.md is a real file already in
+    # the tree, so this exercises the actual markdown-rendering path rather than a
+    # fixture nobody maintains. No other app takes an argument.
+    args=()
+    if [[ "$app" == "release_notes" ]]; then
+        args=("README.md")
+    fi
+
     log="$(mktemp)"
-    "$binary" >"$log" 2>&1 &
+    "$binary" "${args[@]}" >"$log" 2>&1 &
     pid=$!
 
     # Give the application time to reach its first window or die trying.
