@@ -7,7 +7,7 @@ Every mortal and mechanism listed below is credited here—whether their code su
 
 ## The Original Cult of x64dbg
 
-The initial architects who laid the foundation before I claimed it: mrexodia (Duncan Ogilvie), Sigma (creator of the initial GUI illusion), tr4ceflow, Dreg, Nukem, Herz3h, torusrxxx, and the rest of the [bound souls](https://github.com/x64dbg/x64dbg/graphs/contributors).
+They wrote the x64dbg codebase this fork is built upon: mrexodia (Duncan Ogilvie), Sigma (creator of the initial GUI illusion), tr4ceflow, Dreg, Nukem, Herz3h, torusrxxx, and the rest of the [bound souls](https://github.com/x64dbg/x64dbg/graphs/contributors).
 
 ## Cross-Platform Necromancy
 
