@@ -114,6 +114,21 @@ if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::macdeployqt)
     endif()
 endif()
 
+if(APPLE)
+    # Both packaging inputs below (Info.plist.in and machdbg.icns) live two levels up from
+    # CMAKE_SOURCE_DIR (src/cross), i.e. at the repository root. Computed once here, with an
+    # EXISTS guard, rather than spelled out at each use: that makes the src/cross-is-the-
+    # CMake-top-level assumption an assertion instead of something both call sites silently
+    # rely on -- a future repository-root CMakeLists.txt that changes CMAKE_SOURCE_DIR breaks
+    # loudly here instead of quietly wherever qt_executable() next fails to find these files.
+    set(MACHDBG_PACKAGING_DIR "${CMAKE_SOURCE_DIR}/../../packaging")
+    if(NOT EXISTS "${MACHDBG_PACKAGING_DIR}")
+        message(FATAL_ERROR "Expected the packaging directory at ${MACHDBG_PACKAGING_DIR} "
+            "(two levels up from CMAKE_SOURCE_DIR, ${CMAKE_SOURCE_DIR}) -- this assumes "
+            "src/cross is the CMake top level; update MACHDBG_PACKAGING_DIR if that changes.")
+    endif()
+endif()
+
 function(qt_executable tgt)
     if("${QT_PACKAGE}" STREQUAL "Qt6")
         if(APPLE)
@@ -129,7 +144,7 @@ function(qt_executable tgt)
     if(APPLE)
         set_target_properties(${tgt} PROPERTIES
             MACOSX_BUNDLE TRUE
-            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/../../packaging/Info.plist.in"
+            MACOSX_BUNDLE_INFO_PLIST "${MACHDBG_PACKAGING_DIR}/Info.plist.in"
             MACOSX_BUNDLE_BUNDLE_NAME "${tgt}"
             MACOSX_BUNDLE_EXECUTABLE_NAME "${tgt}"
             MACOSX_BUNDLE_GUI_IDENTIFIER "com.machdbg.${tgt}"
@@ -137,16 +152,16 @@ function(qt_executable tgt)
             MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1"
         )
 
-        # Anchored on CMAKE_SOURCE_DIR, matching MACOSX_BUNDLE_INFO_PLIST above, rather than
-        # CMAKE_CURRENT_LIST_DIR. Inside a function(), CMAKE_CURRENT_LIST_DIR resolves against
-        # the call site (today, src/cross/CMakeLists.txt, i.e. src/cross for every caller of
-        # qt_executable()) rather than the file that defines the function (src/cross/widgets,
-        # where Qt.cmake itself lives) -- verified with a debug message() during configure.
-        # CMAKE_SOURCE_DIR has no such call-site dependency, so it stays correct even if a
-        # future caller invokes qt_executable() from a different directory, where
-        # CMAKE_CURRENT_LIST_DIR would silently start resolving somewhere else. Two levels up
-        # from CMAKE_SOURCE_DIR (src/cross) reaches the repository root.
-        set(_icns "${CMAKE_SOURCE_DIR}/../../packaging/machdbg.icns")
+        # MACHDBG_PACKAGING_DIR (set above from CMAKE_SOURCE_DIR, matching
+        # MACOSX_BUNDLE_INFO_PLIST above) is used rather than CMAKE_CURRENT_LIST_DIR. Inside a
+        # function(), CMAKE_CURRENT_LIST_DIR resolves against the call site (today,
+        # src/cross/CMakeLists.txt, i.e. src/cross for every caller of qt_executable()) rather
+        # than the file that defines the function (src/cross/widgets, where Qt.cmake itself
+        # lives) -- verified with a debug message() during configure. CMAKE_SOURCE_DIR has no
+        # such call-site dependency, so it stays correct even if a future caller invokes
+        # qt_executable() from a different directory, where CMAKE_CURRENT_LIST_DIR would
+        # silently start resolving somewhere else.
+        set(_icns "${MACHDBG_PACKAGING_DIR}/machdbg.icns")
         target_sources(${tgt} PRIVATE "${_icns}")
         set_source_files_properties("${_icns}" PROPERTIES
             MACOSX_PACKAGE_LOCATION "Resources"
