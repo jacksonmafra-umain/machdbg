@@ -35,6 +35,13 @@ satisfy the `macos-universal` preset, which links against both arm64 and x86-64 
 Use the official installer whenever you need `macos-universal`, and for anything you intend to
 package or release.
 
+#### Deployment target
+
+The `CMAKE_OSX_DEPLOYMENT_TARGET` in `src/cross/CMakePresets.json` is set to match the minimum
+macOS version that the installed Qt was built against, not chosen freely. Homebrew Qt 6.11 was
+built for macOS 14.0; the official universal Qt required for `macos-universal` may permit a lower
+floor when it is installed for a future milestone.
+
 ### cmkr
 
 `cmkr` is not a Homebrew formula. Download the `cmkr-macos.zip` asset from the

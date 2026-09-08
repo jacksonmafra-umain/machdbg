@@ -9,7 +9,7 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0"
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "14.0"
       }
     },
     {
