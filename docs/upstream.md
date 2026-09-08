@@ -46,6 +46,17 @@ and, for the three files upstream also ships, that the local edit is still prese
 - `src/cross/MachBug/MachBug/api/machbug_api.h` and the four files under
   `src/cross/MachBug/tests/` — the MachBug engine contract header and its test suite. Upstream
   has no `MachBug` directory at all.
+- `src/cross/widgets/Qt.cmake` — `qt_executable` gains an Apple branch: `qt_add_executable(...
+  MACOSX_BUNDLE ...)` in place of `WIN32`, and a `set_target_properties` block that points
+  `MACOSX_BUNDLE_INFO_PLIST` at the new `packaging/Info.plist.in` and fills in the
+  `MACOSX_BUNDLE_*` variables (bundle name, executable name, `com.machdbg.<target>` identifier,
+  version), so the four Qt sample applications build as `.app` bundles instead of bare Mach-O
+  executables. Upstream's own `# TODO: support macdeployqt` comment above the Windows
+  `windeployqt` block, which this change leaves untouched, is what this and the following two
+  tasks address. Unlike the entries above, this file is **not** in `AUTHORED_PATHS` in
+  `scripts/vendor-upstream.sh`, so a re-vendor silently overwrites it with upstream's version;
+  the Apple branch has to be reapplied by hand after every re-sync. Tasks 3 (bundle icon) and 4
+  (`macdeployqt`) extend this same branch in place.
 
 ## Re-syncing
 
