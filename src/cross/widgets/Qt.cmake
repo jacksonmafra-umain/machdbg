@@ -88,14 +88,20 @@ endif()
 # across formulae live under share/), while the official installer keeps them directly
 # under "plugins/"; QT_INSTALL_PLUGINS is correct for either layout.
 #
-# Gated on TARGET ${QT_PACKAGE}::macdeployqt, not just ::qmake: the only thing that
-# actually consumes qt_install_plugins below is gated on ::macdeployqt existing, so this
-# guard is written to match that consumer exactly. Gating on ::qmake alone would let a Qt
-# that exports qmake but not macdeployqt skip this block, leaving qt_install_plugins unset
-# without anyone noticing -- until a future Qt export shape makes the consumer's own guard
-# true while this one silently isn't, reproducing the same empty-variable, wrong-path
-# failure this file already hit once.
-if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::qmake AND TARGET ${QT_PACKAGE}::macdeployqt)
+# Gated on TARGET ${QT_PACKAGE}::macdeployqt, matching the consumer below exactly (the only
+# thing that actually uses qt_install_plugins is gated on ::macdeployqt existing, nothing
+# else). Locating the plugins directory needs qmake, so ::qmake is checked too, but *inside*
+# the block rather than ANDed into its guard: that keeps the outer condition identical to the
+# consumer's, and turns "qmake is missing" into an immediate, clearly-worded configure error
+# instead of silently leaving qt_install_plugins unset for the consumer to fail on later with
+# a cryptic `cmake -E copy ".../platforms/libqoffscreen.dylib"` (a leading slash and nothing
+# else -- the empty variable). This is the failure mode this file already hit once; a Qt that
+# exports macdeployqt but not qmake would otherwise reproduce it in a new form.
+if(${QT_PACKAGE}_FOUND AND APPLE AND TARGET ${QT_PACKAGE}::macdeployqt)
+    if(NOT TARGET ${QT_PACKAGE}::qmake)
+        message(FATAL_ERROR "${QT_PACKAGE}::macdeployqt is exported but ${QT_PACKAGE}::qmake is not; "
+            "locating the offscreen platform plugin (QT_INSTALL_PLUGINS) requires qmake.")
+    endif()
     get_target_property(_qt_qmake_location ${QT_PACKAGE}::qmake IMPORTED_LOCATION)
     execute_process(
         COMMAND "${_qt_qmake_location}" -query QT_INSTALL_PLUGINS
