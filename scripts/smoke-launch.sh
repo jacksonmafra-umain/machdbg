@@ -39,7 +39,17 @@ for app in hex_viewer minidump; do
     else
         wait "$pid" 2>/dev/null
         status=$?
-        fail "$app exited early with status $status: $(head -3 "$log" | tr '\n' ' ')"
+        hint=""
+        if [[ "$status" -eq 137 ]]; then
+            # 137 = 128+SIGKILL. A SIGKILL leaves no stderr to explain itself -- this
+            # exact code and empty log is what an invalid code signature looked like
+            # (the kernel's code-signing enforcement kills the process on first page-in
+            # of a tainted dylib, before it can print anything). Diagnose with
+            # `codesign -vvv --deep` on the bundle and `log show` for
+            # "CODE SIGNING: cs_invalid_page".
+            hint=" (SIGKILL with no output: check the bundle's code signature with 'codesign -vvv --deep', a likely cause)"
+        fi
+        fail "$app exited early with status $status: $(head -3 "$log" | tr '\n' ' ')$hint"
     fi
     rm -f "$log"
 done
