@@ -1,7 +1,9 @@
 #include <MachBug/process/Process.h>
 
 #include <mach/mach_error.h>
+#include <sys/ptrace.h>
 #include <sys/wait.h>
+#include <csignal>
 
 namespace MachBug
 {
@@ -91,5 +93,20 @@ namespace MachBug
             // Debugger.Loop.cpp::Start()) reported through waitpid(), same as IsRealExit()'s
             // comment describes. Keep waiting for the state change that actually is one.
         }
+    }
+
+    bool Process::DetachAndKill(const pid_t pid, int* const exitCode)
+    {
+        // Must happen before kill(): see this function's own comment in Process.h. Return value
+        // ignored deliberately -- this is a best-effort detach that is expected to fail (ESRCH)
+        // when pid was never ptrace-attached at all, and WaitForRealExit(), below, is what
+        // actually confirms whether the kill worked, not this call.
+        ptrace(PT_DETACH, pid, reinterpret_cast<caddr_t>(1), 0);
+
+        if(kill(pid, SIGKILL) != 0)
+            return false;
+
+        WaitForRealExit(pid, exitCode);
+        return true;
     }
 }

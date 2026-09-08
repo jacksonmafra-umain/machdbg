@@ -410,12 +410,15 @@ namespace MachBug
 
         if(mStopRequested.load(std::memory_order_acquire) && mProcess)
         {
-            kill(mProcess->pid, SIGKILL);
-            // Process::WaitForRealExit(), not a bare waitpid(): this pid was
-            // ptrace(PT_ATTACHEXC)'d (Start(), above), so a single un-looped waitpid() call can
-            // return on a queued ptrace stop notification rather than the death this SIGKILL is
-            // meant to confirm -- see that helper's comment.
-            Process::WaitForRealExit(mProcess->pid, nullptr);
+            // Process::DetachAndKill(), not a bare kill()+waitpid(): this pid is still
+            // ptrace(PT_ATTACHEXC)'d (Start(), above), and this is the one place in this class
+            // that is guaranteed to be reached with nobody left servicing the exception port --
+            // the receive loop above has already broken out of. A plain SIGKILL sent here is
+            // routed through that port exactly like any other signal and, unanswered, never takes
+            // effect: not slower, not at all. Reproduced 3/3 with the documented sequence (Init ->
+            // Start -> answer the first stop with Continue -> Stop) before this fix; see
+            // Process::DetachAndKill()'s comment in Process.h.
+            Process::DetachAndKill(mProcess->pid, nullptr);
         }
     }
 

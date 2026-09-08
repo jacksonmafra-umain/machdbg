@@ -137,17 +137,14 @@ namespace MachBug
         const pid_t pid = mProcess->pid;
         mProcess.reset();
 
-        if(kill(pid, SIGKILL) != 0)
-            return false;
-
-        // Process::WaitForRealExit(), not a bare waitpid(): if Start() ran (and therefore
-        // ptrace(PT_ATTACHEXC)'d this pid -- see Debugger.Loop.cpp::Start()), a single un-looped
-        // waitpid() call here can pick up a queued ptrace stop notification instead of the
-        // termination this SIGKILL is meant to confirm, and a stop status miscomputed as an exit
-        // code is the least of it -- see that helper's comment for the actual failure mode this
-        // once was: the process staying alive, unreaped, with this call believing it was done.
-        Process::WaitForRealExit(pid, nullptr);
-        return true;
+        // Process::DetachAndKill(), not a bare kill()+waitpid(): if Start() ran, this pid is
+        // ptrace(PT_ATTACHEXC)'d (Debugger.Loop.cpp::Start()) -- possibly still, if Start()'s own
+        // loop ended some other way than Stop() (an unexpected mach_msg failure, say) without
+        // ever tearing that down. A plain SIGKILL sent to a still-attached pid is routed through
+        // its Mach exception port exactly like any other signal, and with nothing left to service
+        // that port, is never answered -- the pid does not die, at all, not even slower. See that
+        // helper's comment in Process.h for the measured failure mode this once was.
+        return Process::DetachAndKill(pid, nullptr);
     }
 
     void Debugger::cbInternalError(const std::string & error) { (void)error; }

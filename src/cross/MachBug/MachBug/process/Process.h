@@ -62,5 +62,19 @@ namespace MachBug
         // pid could never be waited on at all (waitpid() itself failed, e.g. ECHILD -- already
         // reaped, or never existed).
         static bool WaitForRealExit(pid_t pid, int* exitCode);
+
+        // Detaches ptrace, then SIGKILLs pid, then blocks until it actually dies
+        // (WaitForRealExit()). The detach has to come first: a pid that is still
+        // ptrace(PT_ATTACHEXC)'d (Debugger::Start()) routes SIGKILL through its Mach exception
+        // port exactly like any other signal, and a caller reaching for this is, by construction,
+        // one that has already stopped servicing that port -- the signal is then never answered,
+        // and the pid becomes unkillable by this call or by an external `kill -9` alike (measured:
+        // it does not merely take longer, it does not happen at all). PT_DETACH is a harmless,
+        // ignored-on-failure no-op when pid was never ptrace-attached in the first place -- e.g.
+        // a child Init() launched but whose Start() never ran -- so this is always the right thing
+        // to call before killing a child this class knows about, not only after a live Start().
+        // Returns false only if the kill() itself failed (e.g. the pid was already gone);
+        // *exitCode mirrors WaitForRealExit()'s.
+        static bool DetachAndKill(pid_t pid, int* exitCode);
     };
 }
