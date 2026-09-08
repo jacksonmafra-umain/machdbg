@@ -56,12 +56,26 @@ for app in hex_viewer minidump remote_table release_notes; do
     #
     # `find -type f` (not -L) walks real files only, skipping the *.framework/{Name,
     # Versions/Current} symlinks so each binary is inspected once.
+    #
+    # Every Contents/Frameworks/*.framework binary carries its own LC_ID_DYLIB (self
+    # install name), and macdeployqt leaves that one entry as the original absolute
+    # Homebrew build path -- it rewrites the *references to* each framework in its
+    # dependents to @rpath, never the framework's own id, because nothing resolves a
+    # load at runtime by consulting a library's own id. `otool -L` prints that id as
+    # the first line after the header, indistinguishable in shape from a real
+    # dependency, so it has to be looked up via `otool -D` and excluded by exact match
+    # -- otherwise this check fails every correctly-deployed bundle on its own
+    # frameworks' harmless self-references instead of on an actual bad dependency.
     external=""
     while IFS= read -r -d '' macho; do
         rel="${macho#"$bundle"/}"
+        self_id="$(otool -D "$macho" 2>/dev/null | tail -n +2)"
         bad="$(otool -L "$macho" 2>/dev/null | tail -n +2 | awk '{print $1}' \
             | grep -vE '^@(rpath|executable_path|loader_path)/' \
             | grep -vE '^/(usr/lib|System)/')"
+        if [[ -n "$self_id" && -n "$bad" ]]; then
+            bad="$(grep -vFx "$self_id" <<< "$bad")"
+        fi
         if [[ -n "$bad" ]]; then
             while IFS= read -r path; do
                 external+="$rel -> $path; "
