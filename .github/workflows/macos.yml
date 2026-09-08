@@ -1,0 +1,62 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  arm64:
+    name: Apple Silicon
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        run: |
+          brew install ninja qt capstone
+          curl -sSfL -o cmkr.zip \
+            "$(gh release view --repo build-cpp/cmkr --json assets \
+               --jq '.assets[] | select(.name | test("macos")) | .url')"
+          unzip -o cmkr.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/cmkr
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Verify the toolchain
+        run: |
+          echo "QT_ROOT_DIR=$(brew --prefix qt)" >> "$GITHUB_ENV"
+          QT_ROOT_DIR="$(brew --prefix qt)" ./scripts/check-toolchain.sh
+
+      - name: Verify the vendored tree and the credits
+        run: |
+          ./scripts/verify-vendor.sh
+          ./scripts/check-credits.sh
+
+      - name: Configure
+        working-directory: src/cross
+        run: cmake --preset macos-arm64 -DMACHBUG_BUILD_TESTS=ON
+
+      - name: Build the Qt samples
+        working-directory: src/cross
+        run: cmake --build build/macos-arm64 --target hex_viewer minidump remote_table release_notes
+
+      - name: Build and run the contract tests
+        working-directory: src/cross
+        run: |
+          cmake --build build/macos-arm64 --target MachBug_tests
+          ./build/macos-arm64/tests/MachBug_tests
+
+      - name: Verify the bundles
+        run: ./scripts/check-bundles.sh
+
+  intel:
+    name: Intel (answers research question 3)
+    runs-on: macos-15-intel
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report the runner
+        run: |
+          uname -m
+          sw_vers
