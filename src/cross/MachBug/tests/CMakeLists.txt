@@ -275,6 +275,7 @@ set(MachBug_tests_SOURCES
 	api_contract.cpp
 	api_contract_c.c
 	cmake.toml
+	debugger_launch.cpp
 	mig_exception_server.cpp
 	targets_signed.cpp
 )
@@ -297,6 +298,7 @@ target_include_directories(MachBug_tests PRIVATE
 )
 
 target_link_libraries(MachBug_tests PRIVATE
+	MachBug
 	Catch2::Catch2WithMain
 	machbug_mig
 )
