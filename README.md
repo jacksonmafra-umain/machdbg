@@ -19,7 +19,7 @@ Milestone 0 is complete: The upstream tree has been chained, stripped, and force
 
 GPLv3, inherited from x64dbg. Obey, or be consumed. See [LICENSE](LICENSE).
 
-Plugins are bound by x64dbg's plugin exception. They may remain closed-source, commercial, or private—provided they do not dare steal code from machdbg or x64dbg.
+Plugins are bound by x64dbg's plugin exception, and the compact does not bend: Plugins may be closed-source, commercial or private, unless they copy code from machdbg or x64dbg. Break faith with that clause, and the GPLv3 claims your work as it claims mine.
 
 ## The Servants
 
