@@ -267,6 +267,41 @@ add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
     COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
 )
 
+# Target: machbug_fixture_no_get_task_allow
+set(machbug_fixture_no_get_task_allow_SOURCES
+	cmake.toml
+	"targets/no_get_task_allow.cpp"
+)
+
+add_executable(machbug_fixture_no_get_task_allow)
+
+target_sources(machbug_fixture_no_get_task_allow PRIVATE ${machbug_fixture_no_get_task_allow_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${machbug_fixture_no_get_task_allow_SOURCES})
+
+target_compile_options(machbug_fixture_no_get_task_allow PRIVATE
+	-g
+	-O0
+)
+
+set_target_properties(machbug_fixture_no_get_task_allow PROPERTIES
+	OUTPUT_NAME
+		no_get_task_allow
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT machbug_fixture_no_get_task_allow)
+endif()
+
+set(CMKR_TARGET machbug_fixture_no_get_task_allow)
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} ad-hoc WITHOUT get-task-allow (deliberate -- see targets/no_get_task_allow.cpp)"
+)
+
 # Target: MachBug_tests
 set(CMKR_TARGET MachBug_tests)
 include("../cmake/MachBugMig.cmake")
@@ -275,6 +310,7 @@ set(MachBug_tests_SOURCES
 	api_contract.cpp
 	api_contract_c.c
 	cmake.toml
+	debugger_launch.cpp
 	mig_exception_server.cpp
 	targets_signed.cpp
 )
@@ -297,6 +333,7 @@ target_include_directories(MachBug_tests PRIVATE
 )
 
 target_link_libraries(MachBug_tests PRIVATE
+	MachBug
 	Catch2::Catch2WithMain
 	machbug_mig
 )
@@ -324,4 +361,5 @@ add_dependencies(MachBug_tests
     machbug_fixture_run_endlessly
     machbug_fixture_multi_threaded
     machbug_fixture_crash_bad_access
+    machbug_fixture_no_get_task_allow
 )

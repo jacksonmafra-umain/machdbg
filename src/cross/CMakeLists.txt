@@ -78,6 +78,18 @@ if((CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86
 	set(CMAKE_FOLDER ${CMKR_CMAKE_FOLDER})
 
 endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin") # macos
+	# Subdirectory: MachBug/MachBug
+	set(CMKR_CMAKE_FOLDER ${CMAKE_FOLDER})
+	if(CMAKE_FOLDER)
+		set(CMAKE_FOLDER "${CMAKE_FOLDER}/MachBug/MachBug")
+	else()
+		set(CMAKE_FOLDER "MachBug/MachBug")
+	endif()
+	add_subdirectory("MachBug/MachBug")
+	set(CMAKE_FOLDER ${CMKR_CMAKE_FOLDER})
+
+endif()
 if((CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND MACHBUG_BUILD_TESTS) # machbug-tests
 	# Subdirectory: MachBug/tests
 	set(CMKR_CMAKE_FOLDER ${CMAKE_FOLDER})

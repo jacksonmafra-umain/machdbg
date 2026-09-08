@@ -52,6 +52,16 @@ required=(
     src/cross/MachBug/tests/mig_exception_server.cpp
     src/cross/MachBug/cmake/MachBugMig.cmake
     src/cross/MachBug/cmake/MachBugMigStubs.c
+    src/cross/MachBug/tests/targets/no_get_task_allow.cpp
+    src/cross/MachBug/tests/debugger_launch.cpp
+    src/cross/MachBug/MachBug/cmake.toml
+    src/cross/MachBug/MachBug/CMakeLists.txt
+    src/cross/MachBug/MachBug/types/MachBug.h
+    src/cross/MachBug/MachBug/types/Global.h
+    src/cross/MachBug/MachBug/process/Process.h
+    src/cross/MachBug/MachBug/process/Process.cpp
+    src/cross/MachBug/MachBug/core/Debugger.h
+    src/cross/MachBug/MachBug/core/Debugger.cpp
     src/cross/CMakePresets.json
     src/cross/CMakeLists.txt
 )
@@ -74,11 +84,27 @@ else
     fail "src/cross/cmake.toml is missing the macOS MachBug conditions (MACHBUG_BUILD_TESTS / machbug-tests / [subdir.\"MachBug/tests\"])"
 fi
 
+# Task 3 added the MachBug engine library itself, unconditionally on macOS (unlike the
+# machbug-tests-gated tests subdir) -- a re-vendor that dropped just this one line would leave
+# every file above present but the library no longer wired into the build.
+if [[ -f src/cross/cmake.toml ]] && grep -q '\[subdir\."MachBug/MachBug"\]' src/cross/cmake.toml; then
+    pass "src/cross/cmake.toml carries the MachBug library subdirectory"
+else
+    fail "src/cross/cmake.toml is missing [subdir.\"MachBug/MachBug\"]"
+fi
+
 if [[ -f src/cross/CMakeLists.txt ]] && grep -q 'MACHBUG_BUILD_TESTS' src/cross/CMakeLists.txt \
     && grep -q 'add_subdirectory("MachBug/tests")' src/cross/CMakeLists.txt; then
     pass "src/cross/CMakeLists.txt carries the generated MachBug/tests subdirectory"
 else
     fail "src/cross/CMakeLists.txt is missing the generated MachBug/tests subdirectory (regenerate from cmake.toml with cmkr)"
+fi
+
+if [[ -f src/cross/CMakeLists.txt ]] \
+    && grep -q 'add_subdirectory("MachBug/MachBug")' src/cross/CMakeLists.txt; then
+    pass "src/cross/CMakeLists.txt carries the generated MachBug/MachBug subdirectory"
+else
+    fail "src/cross/CMakeLists.txt is missing the generated MachBug/MachBug subdirectory (regenerate from cmake.toml with cmkr)"
 fi
 
 if [[ -f cmake/cmkr.cmake ]] && grep -q 'vendor-and-strip fork (decision D3)' cmake/cmkr.cmake; then
