@@ -5,7 +5,9 @@ published.
 
 ## Plugin exception
 
-Inherited from x64dbg and preserved deliberately. Plugins may be closed-source, commercial or private, unless they copy code from machdbg or x64dbg. Removing this would take away a right plugin authors have today.
+Inherited from x64dbg and preserved deliberately. Plugins may be closed-source, commercial or
+private, unless they copy code from machdbg or x64dbg. Removing this would take away a right
+plugin authors have today.
 
 ## Dependencies and their status
 

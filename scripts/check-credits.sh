@@ -33,13 +33,18 @@ done
 require_in README.md CREDITS.md
 
 # The plugin exception is a named project constraint, not just prose: both files must state it,
-# and identically, or the two copies drift apart again.
+# and identically, or the two copies drift apart again. The sentence is wrapped across multiple
+# lines to fit each file's prose width, so whitespace (including the line break) is normalised
+# to single spaces before comparing rather than grepping for it on one line.
 plugin_exception="Plugins may be closed-source, commercial or private, unless they copy code from machdbg or x64dbg."
 for file in README.md docs/licenses.md; do
     if [[ ! -f "$file" ]]; then
         printf 'FAIL %s is missing\n' "$file"
         failed=1
-    elif grep -qF -- "$plugin_exception" "$file"; then
+        continue
+    fi
+    normalized="$(tr '\n\t' '  ' < "$file" | tr -s ' ')"
+    if [[ "$normalized" == *"$plugin_exception"* ]]; then
         printf 'ok %s states the plugin exception\n' "$file"
     else
         printf 'FAIL %s does not state the plugin exception verbatim\n' "$file"

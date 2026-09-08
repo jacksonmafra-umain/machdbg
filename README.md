@@ -17,7 +17,8 @@ and issues for what is planned, [docs/COMPILE-macos.md](docs/COMPILE-macos.md) t
 
 GPLv3, inherited from x64dbg. See [LICENSE](LICENSE).
 
-Plugins are covered by x64dbg's plugin exception. Plugins may be closed-source, commercial or private, unless they copy code from machdbg or x64dbg.
+Plugins are covered by x64dbg's plugin exception. Plugins may be closed-source, commercial or
+private, unless they copy code from machdbg or x64dbg.
 
 ## Credits
 
