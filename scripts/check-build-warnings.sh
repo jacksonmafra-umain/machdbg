@@ -33,21 +33,50 @@ WARNINGS=$(grep -o "linking with dylib '[^']*'" /tmp/build_warnings.log | sed "s
 EXPECTED="QtSvg
 QtWebSockets"
 
-if [ -z "$WARNINGS" ]; then
-  echo "ok no linker warnings"
-  exit 0
-fi
+# Normalise both sets: no blank lines, sorted, deduplicated. An empty observed set
+# is a legitimate value here, not a shortcut to success: if QtSvg and QtWebSockets
+# stop warning, the documented exception has outlived its cause and must be removed,
+# so that case has to fail too.
+ACTUAL=$(printf '%s\n' "$WARNINGS" | sed '/^[[:space:]]*$/d' | sort -u)
+EXPECTED=$(printf '%s\n' "$EXPECTED" | sed '/^[[:space:]]*$/d' | sort -u)
 
-# Compare
-ACTUAL=$(echo "$WARNINGS" | sort)
 if [ "$ACTUAL" = "$EXPECTED" ]; then
   echo "ok linker warnings confined to QtSvg and QtWebSockets (as expected)"
   exit 0
-else
-  echo "FAIL linker warnings from unexpected libraries:"
-  comm -23 <(echo "$ACTUAL") <(echo "$EXPECTED") | sed 's/^/  /'
-  echo ""
-  echo "Expected only:"
-  echo "$EXPECTED" | sed 's/^/  /'
-  exit 1
 fi
+
+# comm needs real files/streams; feed it the normalised sets without reintroducing
+# the blank line that `echo ""` would emit for an empty set.
+UNEXPECTED=$(comm -23 <(printf '%s\n' "$ACTUAL" | sed '/^$/d') <(printf '%s\n' "$EXPECTED" | sed '/^$/d'))
+MISSING=$(comm -13 <(printf '%s\n' "$ACTUAL" | sed '/^$/d') <(printf '%s\n' "$EXPECTED" | sed '/^$/d'))
+
+echo "FAIL the observed linker warnings do not match the documented exception."
+
+if [ -n "$UNEXPECTED" ]; then
+  echo ""
+  echo "Libraries that warned but are not part of the exception:"
+  printf '%s\n' "$UNEXPECTED" | sed 's/^/  /'
+fi
+
+if [ -n "$MISSING" ]; then
+  echo ""
+  echo "Libraries the exception expects to warn, but which did not:"
+  printf '%s\n' "$MISSING" | sed 's/^/  /'
+  if [ -z "$ACTUAL" ]; then
+    echo ""
+    echo "No linker warnings were produced at all. The exception documented in"
+    echo "docs/COMPILE-macos.md looks stale: if QtSvg and QtWebSockets no longer"
+    echo "warn, delete the exception and this check instead of leaving them behind."
+  else
+    echo ""
+    echo "The exception documented in docs/COMPILE-macos.md looks partly stale and"
+    echo "should be re-examined."
+  fi
+fi
+
+echo ""
+echo "Observed:"
+if [ -n "$ACTUAL" ]; then printf '%s\n' "$ACTUAL" | sed 's/^/  /'; else echo "  (none)"; fi
+echo "Expected:"
+printf '%s\n' "$EXPECTED" | sed 's/^/  /'
+exit 1
