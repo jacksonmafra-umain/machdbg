@@ -201,10 +201,23 @@ namespace MachBug
 
     void Debugger::exceptionLoop()
     {
-        struct MachMessage
+        // Sized from mach_exc.h's own generated request/reply unions, not a guessed constant:
+        // __Reply__mach_exception_raise_state_t's new_state[1296] alone is close to 5KB once the
+        // other exception_raise_state* variants sharing this subsystem's message ID range are
+        // accounted for. A hand-picked buffer (512 bytes, this file's first draft) is smaller
+        // than that and risks MACH_RCV_TOO_LARGE -- which also destroys the oversized message,
+        // rather than merely truncating it -- for a case this debugger will never actually see
+        // today (THREAD_STATE_NONE was requested, so no state array is ever populated) but has
+        // no business assuming will never change.
+        union RequestMessage
         {
             mach_msg_header_t header;
-            uint8_t body[512];
+            __RequestUnion__catch_mach_exc_subsystem body;
+        };
+        union ReplyMessage
+        {
+            mach_msg_header_t header;
+            __ReplyUnion__catch_mach_exc_subsystem body;
         };
 
         for(;;)
@@ -218,7 +231,7 @@ namespace MachBug
                 break;
             }
 
-            MachMessage request{};
+            RequestMessage request{};
             const mach_msg_return_t rcvResult = mach_msg(
                 &request.header,
                 MACH_RCV_MSG | MACH_RCV_TIMEOUT | MACH_RCV_INTERRUPT,
@@ -258,7 +271,7 @@ namespace MachBug
                 break;
             }
 
-            MachMessage reply{};
+            ReplyMessage reply{};
 
             // handleException() (called synchronously from inside mach_exc_server(), via
             // catch_mach_exception_raise_state_identity() in ExceptionServer.cpp) does not
