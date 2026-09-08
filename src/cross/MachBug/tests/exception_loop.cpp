@@ -112,13 +112,37 @@ namespace
 
         int LastExitCode() const { return mExitCode; }
 
+        // Legibility, not assertion: whichever way the two tests below land, the CI log should
+        // say why without anyone having to re-derive it. cbCreateProcessEvent() fires (see
+        // Debugger.Loop.cpp's Start()) only after task_set_exception_ports has already returned
+        // KERN_SUCCESS and the child has been resumed with the port installed -- so if that never
+        // fires, the failure is a setup problem (a bad entitlement, a denied task_for_pid, ...).
+        // If it DOES fire and the test still never sees SystemBreakpoint, the port was accepted
+        // by the kernel and the child ran, but no exception message ever reached mach_msg -- which
+        // is exactly the wall this environment hits (see the task report). PortsInstalled() below
+        // lets each test print which of those two shapes its own failure has.
+        bool PortsInstalled() const { return mPortsInstalled.load(std::memory_order_acquire); }
+
     protected:
+        void cbCreateProcessEvent(pid_t) override
+        {
+            mPortsInstalled.store(true, std::memory_order_release);
+        }
+
         void cbSystemBreakpoint() override { pushEvent(EventType::SystemBreakpoint); }
 
         void cbExitProcessEvent(int exitCode) override
         {
             mExitCode = exitCode;
             pushEvent(EventType::ExitProcess);
+        }
+
+        void cbInternalError(const std::string & error) override
+        {
+            // Never silently swallowed (the base class's default is a no-op) -- stderr is not
+            // redirected by either test below, so this always reaches the CI log even during the
+            // "the target does not run while stopped" test's stdout capture window.
+            std::fprintf(stderr, "[exception_loop] internal error: %s\n", error.c_str());
         }
 
     private:
@@ -134,8 +158,25 @@ namespace
         std::mutex mEventMutex;
         std::condition_variable mEventCv;
         std::queue<EventType> mEvents;
+        std::atomic<bool> mPortsInstalled{false};
         int mExitCode = -1;
     };
+
+    void reportNoFirstStop(const LocalRecordingDebugger & debugger)
+    {
+        std::fprintf(stderr,
+            "[exception_loop] no SystemBreakpoint event arrived within the timeout. Exception "
+            "port installed before resume: %s. %s\n",
+            debugger.PortsInstalled() ? "yes" : "no",
+            debugger.PortsInstalled()
+                ? "The kernel accepted task_set_exception_ports and the child was resumed with "
+                  "the port live, but no exception message ever reached mach_msg -- this is the "
+                  "sandbox exception-delivery wall documented in the task report, not a code "
+                  "defect, if it also reproduces here on a GitHub Actions runner."
+                : "The port was never confirmed installed before this timeout -- that points at "
+                  "a setup failure (signing/entitlement/task_for_pid), a different problem than "
+                  "the exception-delivery question this CI run exists to answer.");
+    }
 }
 
 // This is the test the task brief asks for verbatim (Step 2), adapted to LocalRecordingDebugger
@@ -146,7 +187,10 @@ TEST_CASE("the first exception stops the target until it is resumed")
     REQUIRE(debugger.Init(FIXTURE("hello_machbug").c_str()));
     REQUIRE(debugger.StartOnThread());
 
-    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+    const bool sawFirstStop = debugger.WaitFor(EventType::SystemBreakpoint);
+    if(!sawFirstStop)
+        reportNoFirstStop(debugger);
+    REQUIRE(sawFirstStop);
     REQUIRE(debugger.IsStopped());
 
     debugger.Continue();
@@ -208,6 +252,8 @@ TEST_CASE("the target does not run while stopped at the first exception, and doe
     REQUIRE(restoreRc != -1);
     REQUIRE(launched);
     REQUIRE(started);
+    if(!stoppedAtFirstException)
+        reportNoFirstStop(debugger);
     REQUIRE(stoppedAtFirstException);
 
     INFO("hello_machbug wrote " << sizeAtStop << " byte(s) the instant the exception loop "
