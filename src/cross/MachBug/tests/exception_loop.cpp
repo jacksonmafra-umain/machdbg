@@ -196,18 +196,16 @@ TEST_CASE("the target does not run while stopped at the first exception, and doe
     unlink(outPath.c_str());
 }
 
-// This drives Debugger::handleException() -- the actual "park until Continue()" logic --
-// directly, with a fabricated exception rather than a real Mach message. It exists because this
-// sandbox could not be made to deliver a genuine Mach exception to any correctly-registered task
-// exception port for any exception type (task_get_exception_ports reads back exactly what was
-// installed; a standalone, dependency-free reproduction outside this codebase hit the same
-// wall); see the task report for the full diagnostic trail. That blocks proving the two tests
-// above pass for the reason they are meant to, but it does not block testing the one piece of
-// logic that never touches the OS's exception-delivery path: that handleException() genuinely
-// does not return -- and therefore the reply that would resume a real thread is genuinely
-// withheld -- until Continue()/StepInto()/Stop() posts a decision. That is the single least
-// obvious property in this file (see the class comment in Debugger.h), so it gets a direct test
-// even though the rest of this task's acceptance criteria could not be verified end-to-end here.
+// This drives Debugger::handleException() -- the actual "park until Continue()" logic -- directly,
+// with a fabricated exception rather than a real Mach message. Real Mach exception delivery does
+// work end-to-end (see the two tests above, and the task report for how getting there took three
+// separate bug fixes); this test is not a workaround for anything currently broken. It stays
+// because it is the one piece of logic that never has to touch the OS's exception-delivery path
+// at all to be exercised: that handleException() genuinely does not return -- and therefore the
+// reply that would resume a real thread is genuinely withheld -- until Continue()/StepInto()/
+// Stop() posts a decision. That is the single least obvious property in this file (see the class
+// comment in Debugger.h), so it is worth a direct, fast, OS-independent regression test in
+// addition to the end-to-end ones, not instead of them.
 TEST_CASE("handleException blocks until Continue() posts a decision")
 {
     MachBug::Debugger debugger;
