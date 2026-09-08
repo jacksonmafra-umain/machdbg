@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Removes vendored components that cannot run on macOS. Idempotent.
 #
-# src/gui/Src stays: the widget library compiles 81 of its files.
+# src/gui/Src stays: the widget library compiles 78 of its files.
 # Zydis stays until milestone 6: x64dbg_widgets still links zydis_wrapper.
 set -euo pipefail
 
