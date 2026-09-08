@@ -13,6 +13,7 @@
 
 #include <mach/mach_error.h>
 #include <mach/thread_status.h>
+#include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <csignal>
 #include <cerrno>
@@ -161,6 +162,32 @@ namespace MachBug
         if(mIsRunning.exchange(true, std::memory_order_acq_rel))
         {
             cbInternalError("Start() called while a debug loop is already running for this Debugger");
+            return false;
+        }
+
+        // task_set_exception_ports() alone only ever catches an exception the target's own
+        // execution triggers directly (a hardware fault, a trap instruction) -- it has no effect
+        // on ordinary BSD signal delivery to the child. Without this call, a completely
+        // well-behaved target (one that never faults) raises no exception in its entire life:
+        // resuming it below via SIGCONT would just let it run straight through, with nothing to
+        // report a first stop from. PT_ATTACHEXC is what changes that: it marks this task as a
+        // Mach-exception-based tracer of the child (mirroring what PTRACE_TRACEME + the kernel's
+        // automatic post-exec SIGTRAP does for ElfBug, just reached from the opposite side and
+        // through the exception port instead of a bare signal) and, critically, makes the
+        // kernel route every signal the child would otherwise receive -- including the very
+        // SIGCONT this function sends a few lines down to undo Init()'s
+        // POSIX_SPAWN_START_SUSPENDED -- through the exception port as EXC_SOFTWARE/
+        // EXC_SOFT_SIGNAL instead of delivering it directly. That SIGCONT-turned-exception is
+        // what becomes the first exception handleException() ever sees and reports through
+        // cbSystemBreakpoint(): replying to it (Continue()) is what lets the original SIGCONT
+        // actually take effect and the child run for the first time. Must happen before the
+        // task_set_exception_ports() call below has any chance to matter, and while the child is
+        // still suspended -- same reasoning as installing the exception ports themselves early.
+        if(ptrace(PT_ATTACHEXC, mProcess->pid, nullptr, 0) != 0)
+        {
+            cbInternalError("ptrace(PT_ATTACHEXC) failed for pid " +
+                             std::to_string(mProcess->pid) + ": " + std::string(strerror(errno)));
+            mIsRunning.store(false, std::memory_order_release);
             return false;
         }
 
