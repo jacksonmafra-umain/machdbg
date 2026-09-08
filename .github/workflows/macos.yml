@@ -41,11 +41,45 @@ jobs:
         working-directory: src/cross
         run: cmake --build build/macos-arm64 --target hex_viewer minidump remote_table release_notes
 
-      - name: Build and run the contract tests
+      # Runs as the ordinary runner user -- no sudo, and none should be added back. Milestone 0's
+      # plan assumed task_for_pid needed root or an Apple-issued identity with
+      # com.apple.security.cs.debugger. Task 1 measured otherwise: a same-user caller with no
+      # debugger entitlement reaches a target ad-hoc signed with com.apple.security.get-task-allow
+      # (every fixture under MachBug/tests/targets is signed that way in cmake.toml), and
+      # get-task-allow is exactly what buys that access. Root would only be needed to reach a
+      # target that withheld get-task-allow, which is not this suite's fixtures.
+      #
+      # This step is also this milestone's core experiment, not just its test runner: every local
+      # attempt to make macOS deliver a Mach exception to a registered task exception port failed
+      # in this sandbox (task_set_exception_ports succeeds, the child faults for real, mach_msg
+      # times out -- ReportCrash intercepts instead per `log show`). A GitHub Actions macOS runner
+      # is a full VM rather than a sandboxed process, so the two exception tests below (in
+      # MachBug/tests/exception_loop.cpp) may finally be able to observe real delivery here. Do
+      # NOT weaken, skip, or mark these tests as expected-to-fail to force this job green -- if
+      # the runner hits the same wall, red here is the answer the milestone needs, not a defect to
+      # paper over. See exception_loop.cpp's reportNoFirstStop() for what a failure here means and
+      # the diagnostic step below for the log-level evidence.
+      - name: Build and run the MachBug engine tests
         working-directory: src/cross
         run: |
           cmake --build build/macos-arm64 --target MachBug_tests
           ./build/macos-arm64/tests/MachBug_tests
+
+      # Only runs when the step above failed. Not required for the milestone's exit criteria --
+      # it exists purely to make a red run legible without anyone having to reproduce it locally:
+      # if the exception tests failed because no Mach exception ever reached the registered port,
+      # ReportCrash (or another system handler) intercepting it in its place is the signature that
+      # distinguishes "the OS took the exception instead of us" from an unrelated code defect. See
+      # the task report for how this was used to diagnose the same failure locally.
+      - name: Diagnose exception delivery (only runs if the engine tests failed)
+        if: failure()
+        run: |
+          echo "---- entitlements on the exception_loop fixtures ----"
+          codesign -d --entitlements :- src/cross/build/macos-arm64/tests/targets/hello_machbug || true
+          codesign -d --entitlements :- src/cross/build/macos-arm64/tests/targets/run_endlessly || true
+          echo "---- recent crash/exception handling activity (best effort; may be empty without sudo) ----"
+          log show --last 5m --predicate 'process == "ReportCrash" OR eventMessage CONTAINS "EXC_"' \
+            --style compact || true
 
       - name: Verify the bundles
         run: ./scripts/check-bundles.sh
