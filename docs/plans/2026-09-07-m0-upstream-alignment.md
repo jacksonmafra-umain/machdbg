@@ -444,15 +444,21 @@ Closes #<issue>"
 ### Task 3: Strip what cannot survive, without breaking the widget library
 
 An earlier draft of the design document called for deleting `src/gui` and Zydis. Reading the
-tree showed both are load-bearing: `src/cross/widgets/CMakeLists.txt` compiles 81 files out of
-`src/gui/Src`, and `x64dbg_widgets` links `zydis_wrapper`. This task removes only what is
+tree showed both are load-bearing: `src/cross/widgets/CMakeLists.txt` compiles 78 files out of
+`src/gui/Src`, and `x64dbg_widgets` links `zydis_wrapper`. (A first, unfiltered grep over that
+CMakeLists.txt counted 81 references; three of those are directory references — one
+`add_subdirectory` call and two `target_include_directories` calls — not file paths, so they
+drop out once the grep is filtered to actual file references.) This task removes only what is
 genuinely unreferenced, and adds the safety net that proves it.
 
 **Files:**
 - Create: `scripts/strip-windows.sh`
 - Modify: `scripts/verify-vendor.sh`
-- Delete: `src/dbg/TitanEngine/`, `src/dbg/GleeBug/`, `src/dbg/XEDParse/`,
-  `src/dbg/DeviceNameResolver/`, `src/exe/`, `src/launcher/`, `src/loaddll/`
+- Delete: `src/dbg/TitanEngine/`, `src/dbg/XEDParse/`, `src/dbg/DeviceNameResolver/`,
+  `src/exe/`, `src/launcher/`, `src/loaddll/`. `src/dbg/GleeBug/` is also listed, in
+  `strip-windows.sh`, but it does not exist in the vendored tree at `8794998` — the entry stays
+  anyway so the script prints `absent` rather than quietly dropping a path the design document
+  still names.
 
 **Interfaces:**
 - Consumes: the vendored tree and `scripts/verify-vendor.sh` from Task 2.
@@ -467,9 +473,9 @@ gh issue create --repo jacksonmafra-umain/machdbg \
   --title "Strip Windows-only components from the vendored tree" \
   --assignee jacksonmafra-umain --milestone "M0 Upstream alignment" \
   --label "type:chore,area:build,upstream,prio:high" \
-  --body "Remove the vendored components that cannot survive on macOS: TitanEngine, GleeBug, XEDParse, DeviceNameResolver, and the Windows-only executable, launcher and loaddll projects.
+  --body "Remove the vendored components that cannot survive on macOS: TitanEngine, GleeBug, XEDParse, DeviceNameResolver, and the Windows-only executable, launcher and loaddll projects. GleeBug is not actually present in the vendored tree at 8794998; it stays in the strip list anyway so the script's 'absent' line keeps that fact visible instead of silently dropping the path.
 
-Two things stay that the first draft of the design document proposed deleting. src/gui/Src stays, because widgets/CMakeLists.txt compiles 81 files out of it. Zydis stays until milestone 6, because x64dbg_widgets links zydis_wrapper and the replacement tokenizer does not exist yet.
+Two things stay that the first draft of the design document proposed deleting. src/gui/Src stays, because widgets/CMakeLists.txt compiles 78 files out of it. Zydis stays until milestone 6, because x64dbg_widgets links zydis_wrapper and the replacement tokenizer does not exist yet.
 
 Add scripts/strip-windows.sh to perform the removals idempotently, and extend scripts/verify-vendor.sh so it fails if a removed path reappears or if any file referenced by widgets/CMakeLists.txt is missing. That second assertion is the safety net: it is what would have caught the original mistake.
 
@@ -511,21 +517,30 @@ else
         if [[ ! -f "src/gui/Src/$rel" ]]; then
             fail "widget library references missing file src/gui/Src/$rel"
         fi
-    done < <(grep -o 'widgets_SOURCE_DIR}/[^}"]*' "$widgets_cmake" | sed 's|widgets_SOURCE_DIR}/||')
-    if [[ "$referenced" -lt 80 ]]; then
-        fail "expected at least 80 referenced widget sources, found $referenced"
+    done < <(grep -oE 'widgets_SOURCE_DIR\}/[A-Za-z0-9_/.-]+\.(cpp|h|ui|qrc)' "$widgets_cmake" | sed 's|widgets_SOURCE_DIR}/||')
+    if [[ "$referenced" -lt 75 ]]; then
+        fail "expected at least 75 referenced widget sources, found $referenced"
     else
         pass "$referenced widget sources referenced and present"
     fi
 fi
 ```
 
+The grep matches only paths ending in a source, header, ui or resource extension. A cruder
+pattern that stops at the next `}` or `"` also catches the two bare `target_include_directories`
+directory references and the one `add_subdirectory` directory reference that share the same
+`widgets_SOURCE_DIR}/...` prefix — inflating the count to 81 and defeating the point of the
+assertion, since a directory is not a file `[[ -f ]]` can check. Filtered to real file
+references, the tree has 78; the floor below is 75, leaving room for upstream churn without
+tolerating a strip that reaches into `src/gui/Src`. A floor of 80 could never pass against this
+tree, filtered or not.
+
 - [ ] **Step 3: Run it to make sure it fails**
 
 Run: `./scripts/verify-vendor.sh; echo "exit=$?"`
 Expected: exit=1, with `FAIL src/dbg/TitanEngine should have been stripped` and one such line
 per removed path. The widget assertion should already print
-`ok <n> widget sources referenced and present`, because nothing has been deleted yet — that is
+`ok 78 widget sources referenced and present`, because nothing has been deleted yet — that is
 the point: the safety net passes before the strip and must still pass after it.
 
 - [ ] **Step 4: Write the strip script**
@@ -536,7 +551,7 @@ Create `scripts/strip-windows.sh`:
 #!/usr/bin/env bash
 # Removes vendored components that cannot run on macOS. Idempotent.
 #
-# src/gui/Src stays: the widget library compiles 81 of its files.
+# src/gui/Src stays: the widget library compiles 78 of its files.
 # Zydis stays until milestone 6: x64dbg_widgets still links zydis_wrapper.
 set -euo pipefail
 
@@ -571,7 +586,7 @@ Expected: one `removed` line per path.
 
 Run: `./scripts/verify-vendor.sh; echo "exit=$?"`
 Expected: exit=0. Every removed path reports `stripped`, and the widget source count still
-reports at least 80 files present.
+reports 78 files present.
 
 - [ ] **Step 7: Verify the script is idempotent**
 
@@ -595,9 +610,9 @@ git push -u origin chore/strip-windows-only
 gh pr create --repo jacksonmafra-umain/machdbg --base main \
   --assignee jacksonmafra-umain --milestone "M0 Upstream alignment" \
   --title "Strip Windows-only components from the vendored tree" \
-  --body "Removes TitanEngine, GleeBug, XEDParse, DeviceNameResolver and the Windows exe, launcher and loaddll projects.
+  --body "Removes TitanEngine, XEDParse, DeviceNameResolver and the Windows exe, launcher and loaddll projects. GleeBug is listed too, but it is absent from the vendored tree at 8794998; the entry stays so the script says so.
 
-src/gui/Src and Zydis both stay. The widget library compiles 81 files out of src/gui/Src, and x64dbg_widgets links zydis_wrapper until the Capstone tokenizer replaces it at milestone 6.
+src/gui/Src and Zydis both stay. The widget library compiles 78 files out of src/gui/Src, and x64dbg_widgets links zydis_wrapper until the Capstone tokenizer replaces it at milestone 6.
 
 verify-vendor.sh gains the assertion that matters: every file referenced by widgets/CMakeLists.txt must exist on disk. That check is what turns a future over-eager strip into a failing script rather than a broken build.
 
@@ -1079,7 +1094,7 @@ typedef struct DbgEngine
 MACHBUG_EXPORT DbgEngine* MachBugCreate(const DbgEngineCallbacks* callbacks);
 MACHBUG_EXPORT void MachBugDestroy(DbgEngine* engine);
 
-/* Detail for the last DbgStatus returned on this thread. Never a kern_return_t. */
+/* Detail for the last DbgStatus returned on this thread. Never a raw Mach kernel return code. */
 MACHBUG_EXPORT const char* DbgLastErrorString(void);
 
 #ifdef __cplusplus
@@ -1154,7 +1169,9 @@ Expected: PASS, seven test cases.
 
 Run: `grep -inE 'dr[0-7]|debug_state|kern_return' src/cross/MachBug/MachBug/api/machbug_api.h; echo "exit=$?"`
 Expected: no output, exit=1. Both are contract requirements from sections 5 and 6 of the design
-document.
+document. This is also why the header's comment on `DbgLastErrorString` reads "raw Mach kernel
+return code" rather than naming `kern_return_t`: the literal type name would match this same
+grep and fail the step that is supposed to prove its absence.
 
 - [ ] **Step 8: Commit**
 

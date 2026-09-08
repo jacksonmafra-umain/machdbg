@@ -106,7 +106,7 @@ Two things stay that an earlier draft of this document proposed deleting. Both w
 after reading upstream at commit `8794998`.
 
 **`src/gui/Src` stays.** The widget library is not a self-contained directory. `widgets` is
-sixteen shim files of its own plus a curated list of 81 files compiled straight out of
+sixteen shim files of its own plus a curated list of 78 files compiled straight out of
 `src/gui/Src`, spanning `Accessible`, `BasicView`, `Disassembler`, `Gui`, `Memory`,
 `ThirdPartyLibs` and `Utils`. Deleting the Windows Qt shell destroys `x64dbg::widgets` with it.
 The upstream extraction is at an earlier stage than the project brief implies. Windows-only

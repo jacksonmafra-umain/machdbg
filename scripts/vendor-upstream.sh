@@ -42,6 +42,8 @@ for path in "${AUTHORED_PATHS[@]}"; do
     if [[ -e "$repo_root/$path" ]]; then
         mkdir -p "$preserve/$(dirname "$path")"
         cp -R "$repo_root/$path" "$preserve/$path"
+    else
+        printf 'warning: authored path is already absent, nothing to preserve: %s\n' "$path" >&2
     fi
 done
 
