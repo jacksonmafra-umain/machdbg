@@ -1,35 +1,30 @@
 # Credits
 
-machdbg is an independent GPLv3 fork of [x64dbg](https://github.com/x64dbg/x64dbg). Everything
-below is credited whether or not its code survives in this tree.
+**I, Jackson Mafra, Supreme Necromancer and Architect of Death, have forged machdbg.**
 
-## x64dbg
+It is an independent GPLv3 fork raised from the bones of [x64dbg](https://github.com/x64dbg/x64dbg). 
+Every mortal and mechanism listed below has contributed to this construct—whether their code survives within my domain or has been consumed into the abyss.
 
-mrexodia (Duncan Ogilvie), Sigma (initial GUI), tr4ceflow, Dreg, Nukem, Herz3h, torusrxxx, and
-the [contributor list](https://github.com/x64dbg/x64dbg/graphs/contributors).
+## The Original Cult of x64dbg
 
-## Cross-platform groundwork
+The initial architects who laid the foundation before I claimed it: mrexodia (Duncan Ogilvie), Sigma (creator of the initial GUI illusion), tr4ceflow, Dreg, Nukem, Herz3h, torusrxxx, and the rest of the [bound souls](https://github.com/x64dbg/x64dbg/graphs/contributors).
 
-- **@3rdit** — the ElfBug engine and the cross-platform debugger shell this port mirrors.
-- **@eldarkg** — the Wine build documentation.
+## Cross-Platform Necromancy
 
-## Upstream dependencies
+* **@3rdit** — Raised the ElfBug engine and the cross-platform shell that this port mirrors.
+* **@eldarkg** — Documented the ritual of the Wine build.
 
-TitanEngine Community Edition, Zydis, GleeBug, XEDParse, asmjit, Scylla, Jansson, lz4, the bug icon by
-VisualPharm, interface icons by Fugue, website by tr4ceflow.
+## Bound Upstream Relics
 
-Some of these no longer ship in machdbg. They are credited because the code that grew around
-them does.
+TitanEngine Community Edition, Zydis, GleeBug, XEDParse, asmjit, Scylla, Jansson, lz4, the beetle sigil by VisualPharm, interface icons by Fugue, and the web altar by tr4ceflow.
 
-## Reference plugins
+Some of these relics no longer reside within machdbg. They remain credited because the dark logic forged around them still endures.
 
-- [mrexodia/StackContains](https://github.com/mrexodia/StackContains) — the Tier 1 plugin
-  acceptance test.
-- [mrexodia/DrDecode](https://github.com/mrexodia/DrDecode) — the architecture-bound plugin the
-  tiering was designed against.
+## Tested Servants (Reference Plugins)
 
-## macOS prior art
+* [mrexodia/StackContains](https://github.com/mrexodia/StackContains) — The Tier 1 trial of plugin acceptance.
+* [mrexodia/DrDecode](https://github.com/mrexodia/DrDecode) — The architecture-bound thrall against which my tiering was designed.
 
-[gdbinit](https://github.com/gdbinit/Gdbinit) by Pedro Vilaça (fG!) — a design reference for
-register and context display conventions on macOS. Its licence is checked before any code or
-layout is reused; the credit stands either way.
+## Ancient macOS Lore
+
+[gdbinit](https://github.com/gdbinit/Gdbinit) by Pedro Vilaça (fG!) — A sacred design reference for register display and context conventions on macOS. Its binding contract is inspected before any logic or layout is claimed; the credit stands for eternity.

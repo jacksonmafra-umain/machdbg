@@ -35,6 +35,16 @@ satisfy the `macos-universal` preset, which links against both arm64 and x86-64 
 Use the official installer whenever you need `macos-universal`, and for anything you intend to
 package or release.
 
+#### Deployment target
+
+The `CMAKE_OSX_DEPLOYMENT_TARGET` in `src/cross/CMakePresets.json` is set to match the minimum
+macOS version that the installed Qt was built against, not chosen freely. Homebrew Qt 6.11's
+`qtbase` is built for macOS 14.0. Two separate Homebrew formulae, `qtsvg` and `qtwebsockets`, are
+bottled against macOS 26.0 (built on a newer runner); every link of the four Qt targets warns
+about these frameworks. The floor deliberately tracks `qtbase` at 14.0 because raising it to 26.0
+would set the bundles' minimum OS to 26 in a later milestone. Installing the official universal
+Qt, required for `macos-universal` and eventual release, resolves this inconsistency at the source.
+
 ### cmkr
 
 `cmkr` is not a Homebrew formula. Download the `cmkr-macos.zip` asset from the
