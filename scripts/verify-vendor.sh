@@ -56,6 +56,7 @@ required=(
     src/cross/MachBug/tests/debugger_launch.cpp
     src/cross/MachBug/tests/exception_loop.cpp
     src/cross/MachBug/tests/TestHarness.h
+    src/cross/MachBug/tests/test_harness.cpp
     src/cross/MachBug/MachBug/cmake.toml
     src/cross/MachBug/MachBug/CMakeLists.txt
     src/cross/MachBug/MachBug/types/MachBug.h

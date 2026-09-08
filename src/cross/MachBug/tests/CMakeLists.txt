@@ -312,6 +312,7 @@ set(MachBug_tests_SOURCES
 	exception_loop.cpp
 	mig_exception_server.cpp
 	targets_signed.cpp
+	test_harness.cpp
 )
 
 add_executable(MachBug_tests)
