@@ -505,12 +505,17 @@ distributing a private key to CI.
 ### The Intel coverage problem
 
 The project owner has no Intel Mac, and D4 commits to universal support. GitHub Actions provides
-an Intel macOS runner image (`macos-13`) alongside the arm64 images, which gives the x86-64 half
-of milestones 3, 4 and 6 real coverage without buying hardware.
+an Intel macOS runner image alongside the arm64 images, which gives the x86-64 half of
+milestones 3, 4 and 6 real coverage without buying hardware.
 
-Two caveats. The availability of the Intel image must be confirmed at milestone 3, because these
-images are being retired. If it is gone, the fallback is the `unverified` label on the affected
-work, not a claim of coverage. Rosetta is not a substitute; it is out of scope.
+Confirmed at milestone 1, ahead of schedule, rather than deferred to milestone 3: the
+`.github/workflows/macos.yml` Intel job ran on `macos-15-intel` on 2026-09-08 and reported
+`x86_64` / macOS 15.7.9 (build 24G830). The runner is real and the label works. The contingency
+this section anticipated — falling back to the `unverified` label because the image was gone —
+did not materialise; the `macos-13` label named in the original plan no longer exists, but its
+retirement took the label with it, not the architecture. Rosetta is not a substitute; it remains
+out of scope. The image's continued availability still needs a fresh check before milestones 3,
+4 and 6 build anything on it, since this job only reports and does not compile.
 
 ## 12. Milestones and definition of done
 
@@ -548,8 +553,12 @@ Each of these gets its own issue. None blocks work before the milestone named.
 1. **AArch64 assembler** (milestone 6): does asmtk parse AArch64? If not, LLVM MC as an
    assembler only, or the Clang integrated assembler. Keystone is excluded on licence grounds.
 2. **DWARF parser** (milestone 7): libdwarf pending a licence check, or an alternative.
-3. **Intel CI image** (milestone 3): confirm `macos-13` availability, or fall back to
-   `unverified`.
+3. **Intel CI image** — answered 2026-09-08 in milestone 1's CI workflow: the image is
+   available as `macos-15-intel` (the `macos-13` label named when this question was written no
+   longer exists). The job in `.github/workflows/macos.yml` ran `uname -m` and `sw_vers` on it
+   and got `x86_64` and macOS 15.7.9 (build 24G830) back, confirming a working Intel runner
+   without requiring the project owner to buy Intel hardware. `unverified` remains the fallback
+   label if a future milestone finds the image gone, but that has not happened.
 4. **Capstone version and constants** (milestone 6): confirm the AArch64 architecture constant
    against the installed header.
 5. **macOS bundling in `qt_executable`** (milestone 1): `Qt.cmake` already prefers Qt 6, so the

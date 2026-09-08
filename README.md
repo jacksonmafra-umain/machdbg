@@ -1,5 +1,7 @@
 # machdbg
 
+[![macOS](https://github.com/jacksonmafra-umain/machdbg/actions/workflows/macos.yml/badge.svg)](https://github.com/jacksonmafra-umain/machdbg/actions/workflows/macos.yml)
+
 **Mortals, bow before machdbg.**
 
 I have ripped the soul of the x64dbg workflow from its grave and bound its dark will onto macOS. The familiar views, expression parser, and command set now bend to my command, enforcing my absolute order upon Mach-O processes running on Apple Silicon and Intel alike.
