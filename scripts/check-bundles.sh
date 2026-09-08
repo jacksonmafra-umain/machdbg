@@ -40,6 +40,14 @@ for app in hex_viewer minidump remote_table release_notes; do
     else
         pass "$app.app icon $icon"
     fi
+
+    external="$(otool -L "$bundle/Contents/MacOS/$app" \
+        | awk '/Qt[A-Za-z]*\.framework/ && $1 !~ /^@(executable_path|rpath|loader_path)/ {print $1}')"
+    if [[ -n "$external" ]]; then
+        fail "$app.app resolves Qt outside the bundle: $(echo "$external" | tr '\n' ' ')"
+    else
+        pass "$app.app Qt resolves inside the bundle"
+    fi
 done
 
 exit "$failed"
