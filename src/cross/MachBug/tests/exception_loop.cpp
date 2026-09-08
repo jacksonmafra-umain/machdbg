@@ -240,3 +240,54 @@ TEST_CASE("handleException blocks until Continue() posts a decision")
 
     debugger.Terminate();
 }
+
+// Drives the signal-passthrough classification directly, with a fabricated second exception,
+// rather than relying on the ~1-in-10 natural occurrence that is how this bug was first found
+// (see the task report). PT_ATTACHEXC (Debugger.Loop.cpp::Start()) routes every signal the child
+// receives through the exception port as EXC_SOFTWARE/EXC_SOFT_SIGNAL, and the very first one --
+// the SIGCONT that resumes the target -- is deliberately treated as the first stop. Any *later*
+// one must be answered immediately instead of parked on, since nothing gives a caller a way to
+// have asked to intercept it; parking on it left the reporting thread waiting for a Continue()
+// call nobody knew to make. This test forces exactly that second case: a first call establishes
+// "the first stop has already happened" (via a plain EXC_BREAKPOINT, parked and released with
+// Continue(), the same as the test above), then a second call with a fabricated EXC_SOFTWARE/
+// EXC_SOFT_SIGNAL exception must return promptly, without ever parking.
+TEST_CASE("a second signal-passthrough exception is answered without parking")
+{
+    MachBug::Debugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+
+    std::thread firstThread([&] {
+        debugger.handleException(MACH_PORT_NULL, EXC_BREAKPOINT, nullptr, 0);
+    });
+    for(int i = 0; i < 500 && !debugger.IsStopped(); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(debugger.IsStopped());
+    debugger.Continue();
+    firstThread.join();
+    REQUIRE_FALSE(debugger.IsStopped());
+
+    // EXC_SOFTWARE (5) with code[0] == EXC_SOFT_SIGNAL (0x10003) and code[1] the signal number --
+    // the exact shape PT_ATTACHEXC produces for a passed-through SIGCONT (19).
+    mach_exception_data_type_t code[2] = {0x10003, 19};
+    std::atomic<bool> secondReturned{false};
+    std::thread secondThread([&] {
+        debugger.handleException(MACH_PORT_NULL, EXC_SOFTWARE, code, 2);
+        secondReturned.store(true, std::memory_order_release);
+    });
+
+    // A generous window for a call that, if this were still parking (the bug), would not return
+    // within it at all -- the only way to fail this loop is to time it out, which the REQUIRE
+    // below then catches. Detached, not joined: if this ever regresses, secondThread is parked
+    // inside handleException() forever (nothing will ever call Continue() for it -- that is
+    // exactly the bug), and joining it would hang this whole test binary instead of failing one
+    // assertion. Detaching means a regression here is a clean, fast FAILED, not a CI timeout.
+    for(int i = 0; i < 500 && !secondReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    secondThread.detach();
+
+    REQUIRE(secondReturned.load(std::memory_order_acquire));
+    REQUIRE_FALSE(debugger.IsStopped());
+
+    debugger.Terminate();
+}
