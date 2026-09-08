@@ -50,6 +50,18 @@ jobs:
       - name: Verify the bundles
         run: ./scripts/check-bundles.sh
 
+      # scripts/check-build-warnings.sh is deliberately not run here. It performs its own
+      # full clean configure-and-build of all four Qt targets in a fresh temporary directory
+      # to capture and diff the linker warning set, which would double this job's ~5 minute
+      # build (plus four ~90 MB macdeployqt copies) for a check whose only value over the
+      # build above is asserting the *exact* warning set rather than merely tolerating
+      # warnings. Run it locally, or as a separate on-demand job, if that assertion is ever
+      # needed in CI.
+      #
+      # This runner installs Qt via Homebrew, so the smoke-launch step below proves the
+      # bundles start and their load commands resolve -- it does not prove they run on a
+      # machine with no Qt installed, which is what macdeployqt exists to achieve and what
+      # the eventual definition of done needs.
       - name: Smoke-launch
         run: MACHDBG_SMOKE_OFFSCREEN=1 ./scripts/smoke-launch.sh
 
