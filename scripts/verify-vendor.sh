@@ -76,6 +76,20 @@ else
     fail "cmake/cmkr.cmake is missing the dead submodule bootstrap removal (decision D3)"
 fi
 
+# src/cross/widgets/Qt.cmake is in the same category: existence alone would still pass after a
+# re-vendor silently reverted qt_executable to upstream's Windows-only WIN32 branch, dropping
+# .app bundle support entirely. Unlike the three files above, this one is deliberately not in
+# vendor-upstream.sh's AUTHORED_PATHS (see docs/upstream.md, "What was changed locally"), so
+# nothing else preserves it automatically. The marker is the bundle identifier qt_executable
+# sets on Apple: it names this fork specifically (upstream has no such string), and — unlike the
+# surrounding set_target_properties block, which Tasks 3 and 4 extend with an icon and a
+# macdeployqt step — it has no reason to change when they do.
+if [[ -f src/cross/widgets/Qt.cmake ]] && grep -qF 'MACOSX_BUNDLE_GUI_IDENTIFIER "com.machdbg.${tgt}"' src/cross/widgets/Qt.cmake; then
+    pass "src/cross/widgets/Qt.cmake carries the Apple MACOSX_BUNDLE branch"
+else
+    fail "src/cross/widgets/Qt.cmake is missing the Apple MACOSX_BUNDLE branch (qt_executable's com.machdbg.<target> MACOSX_BUNDLE_GUI_IDENTIFIER)"
+fi
+
 # Paths the strip script removes. They must not come back.
 removed=(
     src/dbg/TitanEngine
