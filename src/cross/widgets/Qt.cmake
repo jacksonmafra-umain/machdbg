@@ -80,6 +80,23 @@ function(qt_executable tgt)
             MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0"
             MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1"
         )
+
+        # CMAKE_CURRENT_LIST_DIR here is the directory of the listfile that CALLS
+        # qt_executable() (src/cross, since qt_executable is a function: CMake
+        # resolves CMAKE_CURRENT_LIST_DIR against the call site, not the file
+        # that defines the function), not the directory containing Qt.cmake
+        # itself. Verified with a debug message() during configure. Two levels
+        # up from src/cross reaches the repository root, matching the sibling
+        # MACOSX_BUNDLE_INFO_PLIST path above (which spells the same directory
+        # via CMAKE_SOURCE_DIR).
+        set(_icns "${CMAKE_CURRENT_LIST_DIR}/../../packaging/machdbg.icns")
+        target_sources(${tgt} PRIVATE "${_icns}")
+        set_source_files_properties("${_icns}" PROPERTIES
+            MACOSX_PACKAGE_LOCATION "Resources"
+        )
+        set_target_properties(${tgt} PROPERTIES
+            MACOSX_BUNDLE_ICON_FILE "machdbg.icns"
+        )
     endif()
 
     # Run windeployqt after build to copy Qt DLLs next to the executable.
