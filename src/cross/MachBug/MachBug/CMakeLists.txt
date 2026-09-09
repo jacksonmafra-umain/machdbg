@@ -30,8 +30,12 @@ include("../cmake/MachBugMig.cmake")
 set(MachBug_SOURCES
 	"api/machbug_api.cpp"
 	"api/machbug_api.h"
+	"arch/Arch.cpp"
+	"arch/Arch.h"
 	"arch/Arm64.cpp"
 	"arch/Arm64.h"
+	"arch/X86_64.cpp"
+	"arch/X86_64.h"
 	cmake.toml
 	"core/Debugger.Loop.cpp"
 	"core/Debugger.cpp"
