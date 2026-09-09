@@ -68,6 +68,13 @@ required=(
     src/cross/MachBug/MachBug/arch/X86_64.cpp
     src/cross/MachBug/tests/registers_x86_64.cpp
     src/cross/MachBug/tests/memory.cpp
+    src/cross/MachBug/tests/register_format.cpp
+    src/cross/views/cmake.toml
+    src/cross/views/CMakeLists.txt
+    src/cross/views/RegisterFormat.h
+    src/cross/views/RegisterFormat.cpp
+    src/cross/views/RegisterTable.h
+    src/cross/views/RegisterTable.cpp
     src/cross/MachBug/tests/targets/known_globals.cpp
     src/cross/MachBug/MachBug/memory/Memory.h
     src/cross/MachBug/MachBug/memory/Memory.cpp

@@ -130,6 +130,12 @@ link-libraries = [
 [subdir."ElfBug/tests"]
 condition = "elfbug-tests"
 
+# machdbg's own view widgets. macOS-only for the same reason MachBug is: the register view it
+# holds is driven by the MachBug engine's descriptor table, and there is no ElfBug equivalent of
+# that table to drive it from on Linux yet.
+[subdir.views]
+condition = "macos"
+
 [subdir."MachBug/MachBug"]
 condition = "macos"
 
