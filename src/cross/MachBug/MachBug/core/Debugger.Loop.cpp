@@ -419,6 +419,10 @@ namespace MachBug
             if(mStopRequested.load(std::memory_order_acquire))
                 break; // Stop() supplied the decision inside handleException(); the reply that
                        // resumed the reporting thread has gone out, so it is safe to kill now.
+
+            // Only here, after the send succeeded and with no teardown pending, is the target
+            // actually running again -- see cbResumed()'s comment in Debugger.h.
+            cbResumed();
         }
 
         if(mStopRequested.load(std::memory_order_acquire) && mProcess)
@@ -627,6 +631,7 @@ namespace MachBug
     void Debugger::cbCreateProcessEvent(pid_t) {}
     void Debugger::cbExitProcessEvent(int) {}
     void Debugger::cbSystemBreakpoint() {}
+    void Debugger::cbResumed() {}
     void Debugger::cbStep() {}
     void Debugger::cbException(uint32_t, uint64_t) {}
 }

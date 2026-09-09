@@ -277,6 +277,38 @@ TEST_CASE("a signal-passthrough exception for a signal other than SIGCONT is not
 // and confirms both that the loop thread actually returns (bounded -- see
 // RecordingDebugger::WaitForLoopToFinish()'s comment) and that the process is actually dead,
 // checked independently of this class's own bookkeeping via kill(pid, 0).
+// Guards the meaning of the signal the test below now waits on, rather than its plumbing: a
+// cbResumed() fired when the exception message *arrives* -- before handleException() parks on
+// the command queue -- would still reach the harness, still let that test proceed, and still be
+// wrong, because at that moment the reply is unsent and the target is stopped. The first stop is
+// the sharpest place to catch that: the target is parked there for as long as nobody answers, so
+// any Resumed event seen before Continue() can only be a premature one.
+TEST_CASE("no resume is reported while the target is parked at its first stop")
+{
+    RecordingDebugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+    debugger.StartOnThread();
+    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+    REQUIRE(debugger.IsStopped());
+
+    // count() over the whole timeline, not WaitFor(): a successful WaitFor consumes every event
+    // up to the one it matched (TestHarness.h), so the WaitFor(SystemBreakpoint) above would have
+    // consumed -- and hidden -- a premature Resumed published just before it. count() sees the
+    // complete timeline regardless of what has been consumed, which is what makes this assertion
+    // able to fail at all.
+    //
+    // The 300ms is a deliberate dwell, not a synchronisation wait: the assertion is that nothing
+    // arrives, and a premature report would already be recorded microseconds after the stop.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    REQUIRE(debugger.count(EventType::Resumed) == 0);
+    REQUIRE(debugger.IsStopped());
+
+    debugger.Continue();
+    REQUIRE(debugger.WaitFor(EventType::Resumed));
+    REQUIRE(debugger.count(EventType::Resumed) == 1);
+    REQUIRE_FALSE(debugger.IsStopped());
+}
+
 TEST_CASE("Stop() kills a genuinely running target instead of hanging on its own SIGKILL")
 {
     RecordingDebugger debugger;
@@ -287,10 +319,12 @@ TEST_CASE("Stop() kills a genuinely running target instead of hanging on its own
     const pid_t pid = debugger.GetPid();
     debugger.Continue();
 
-    // No event to wait on for "now running freely, for real" -- give it a moment to actually
-    // resume and start spinning in run_endlessly's for(;;) sleep(1) loop, so Stop() below is
-    // exercised against a live, running target and not one still mid-resume.
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    // Waits for the reply that answers the first stop to have actually gone out -- that send is
+    // what resumes the target thread (Debugger.h's class comment), so past this point Stop()
+    // below is exercised against a live, running target and not one still mid-resume. This used
+    // to be a sleep_for(300ms), which asserted nothing and would have passed just as happily
+    // against a target that never resumed at all.
+    REQUIRE(debugger.WaitFor(EventType::Resumed));
 
     debugger.Stop();
 

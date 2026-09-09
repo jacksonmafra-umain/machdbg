@@ -94,6 +94,12 @@ namespace
                 cb.onSystemBreakpoint(cb.userdata);
         }
 
+        void cbResumed() override
+        {
+            if(cb.onResumed)
+                cb.onResumed(cb.userdata);
+        }
+
         void cbStep() override
         {
             if(cb.onStep)

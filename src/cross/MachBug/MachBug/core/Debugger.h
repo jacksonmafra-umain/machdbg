@@ -197,6 +197,18 @@ namespace MachBug
         // it had to be asked for explicitly by installing the port before resuming.
         virtual void cbSystemBreakpoint();
 
+        // Fired from the loop thread once the reply to an exception has actually been sent --
+        // i.e. the target thread the exception stopped is running again. That send, not the
+        // Continue()/StepInto() call that decided it, is what resumes the target (see the class
+        // comment above), so this is the only point from which "the target is genuinely running"
+        // can be reported rather than guessed at.
+        //
+        // Deliberately not fired for Pause()/Continue()'s task_suspend()/task_resume() pairing:
+        // that path is synchronous on the caller's own thread -- task_resume() has already
+        // returned by the time Continue() does -- so a caller there needs no notification to
+        // learn what it just did itself.
+        virtual void cbResumed();
+
         // Fired from the loop thread when a single-step armed by StepInto() completes (the
         // thread raised the trap that single-stepping itself causes, rather than a fresh,
         // unrelated exception).

@@ -117,6 +117,13 @@ typedef void (*DbgCbSystemBreakpoint)(void* userdata);
 typedef void (*DbgCbBreakpoint)(uint64_t address, void* userdata);
 typedef void (*DbgCbStep)(void* userdata);
 typedef void (*DbgCbPaused)(void* userdata);
+/* The target is running again after a stop. A backend fires this only when resuming is
+   asynchronous to the Continue/StepInto call that asked for it -- MachBug's stop is an
+   unanswered exception reply, so the target runs when the engine's own loop thread sends
+   that reply, not when Continue returns. A backend whose resume completes inside Continue
+   (ptrace) leaves this unfired, and a caller that only needs "my Continue succeeded"
+   should read Continue's status instead of waiting for this. */
+typedef void (*DbgCbResumed)(void* userdata);
 typedef void (*DbgCbError)(const char* error, void* userdata);
 typedef void (*DbgCbDebugString)(const char* text, void* userdata);
 typedef void (*DbgCbLoadModule)(uint64_t base, const char* path, void* userdata);
@@ -133,6 +140,7 @@ typedef struct
     DbgCbBreakpoint onBreakpoint;
     DbgCbStep onStep;
     DbgCbPaused onPaused;
+    DbgCbResumed onResumed;
     DbgCbError onError;
     DbgCbDebugString onDebugString;
     DbgCbLoadModule onLoadModule;
