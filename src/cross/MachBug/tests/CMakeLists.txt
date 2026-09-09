@@ -394,6 +394,7 @@ set(MachBug_tests_SOURCES
 	targets_signed.cpp
 	test_harness.cpp
 	thread_resolution.cpp
+	threads.cpp
 )
 
 add_executable(MachBug_tests)

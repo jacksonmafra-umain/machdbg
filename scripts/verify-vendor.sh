@@ -74,6 +74,9 @@ required=(
     src/cross/MachBug/tests/targets/known_function.cpp
     src/cross/MachBug/MachBug/core/Breakpoints.h
     src/cross/MachBug/MachBug/core/Breakpoints.cpp
+    src/cross/MachBug/MachBug/core/Threads.h
+    src/cross/MachBug/MachBug/core/Threads.cpp
+    src/cross/MachBug/tests/threads.cpp
     src/cross/views/cmake.toml
     src/cross/views/CMakeLists.txt
     src/cross/views/RegisterFormat.h

@@ -35,7 +35,18 @@ TEST_CASE("a stop names the thread that raised it, and threadId 0 resolves to it
     const mach_port_t stopped = debugger.StoppedThread();
     REQUIRE(stopped != MACH_PORT_NULL);
     REQUIRE(debugger.ResolveThread(0) == stopped);
-    REQUIRE(debugger.ResolveThread(stopped) == stopped);
+
+    // A threadId is the system thread id, not a port name -- milestone 4 changed that, because a
+    // port name identifies a thread only until the next task_threads call mints new rights. The
+    // id of the thread that is stopped resolves to a usable port for it; the port name itself,
+    // handed back as an id, does not name any thread.
+    thread_identifier_info_data_t identity{};
+    mach_msg_type_number_t identityCount = THREAD_IDENTIFIER_INFO_COUNT;
+    REQUIRE(thread_info(stopped, THREAD_IDENTIFIER_INFO,
+                        reinterpret_cast<thread_info_t>(&identity),
+                        &identityCount) == KERN_SUCCESS);
+    REQUIRE(identity.thread_id != 0);
+    REQUIRE(debugger.ResolveThread(identity.thread_id) != MACH_PORT_NULL);
 
     // The port is a real thread of the target, not a number that merely survived being stored.
 #if defined(__arm64__) || defined(__aarch64__)

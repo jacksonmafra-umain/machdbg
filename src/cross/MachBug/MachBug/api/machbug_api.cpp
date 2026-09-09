@@ -113,15 +113,26 @@ namespace
                 cb.onStep(cb.userdata);
         }
 
+        void cbThreadCreate(uint64_t threadId) override
+        {
+            if(cb.onThreadCreate)
+                cb.onThreadCreate(threadId, cb.userdata);
+        }
+
+        void cbThreadExit(uint64_t threadId) override
+        {
+            if(cb.onThreadExit)
+                cb.onThreadExit(threadId, cb.userdata);
+        }
+
         void cbException(const uint32_t type, const uint64_t address) override
         {
             if(cb.onException)
                 cb.onException(type, address, cb.userdata);
         }
 
-        // onBreakpoint, onPaused, onDebugString, onLoadModule, onUnloadModule, onThreadCreate and
-        // onThreadExit have no MachBug::Debugger event to wire them to yet: breakpoints and
-        // per-thread state are milestones 3/4, modules are milestone 5, and Debugger::Pause()
+        // onPaused, onDebugString, onLoadModule and onUnloadModule have no MachBug::Debugger
+        // event to wire them to yet: modules are milestone 5, and Debugger::Pause()
         // (unlike ElfBug's Pause(), which surfaces through the waitpid loop that already exists
         // there) task_suspend()s the target directly with nothing in this milestone's loop to
         // notice and report it from. Left unfired here rather than fired with fabricated

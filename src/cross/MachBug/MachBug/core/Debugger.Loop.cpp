@@ -440,6 +440,10 @@ namespace MachBug
         //
         // mStepArmed survives an exception that is not the step: the step may still land later,
         // and forgetting it would leave the trap armed with nothing waiting for it.
+        // Every stop is a chance to see what the target's thread list has done since the last
+        // one -- and the only chance, since nothing notifies a debugger of a thread's birth.
+        refreshThreads();
+
         const bool wasStepCompletion = mStepArmed &&
             arch::IsSingleStepTrap(kLoopArch, exception, code, codeCnt);
         if(wasStepCompletion)
@@ -464,27 +468,7 @@ namespace MachBug
         {
             mSteppingOverBreakpoint = false;
 
-            // MEASURED: the step that gets a target off a breakpoint completes as a SIGTRAP
-            // passthrough, and answering that exception with KERN_SUCCESS is not enough to stop
-            // the kernel from then delivering the signal -- whose default action kills the
-            // target. The first version of this cycle did exactly that, and the fixture died with
-            // ExitProcess(code=-5).
-            //
-            // PT_THUPDATE is the request that decides a passed-through signal's fate: its third
-            // argument is the thread port and its fourth is the signal to deliver, so zero means
-            // deliver nothing. The trap belongs to this engine's own machinery -- the target
-            // never asked for it and must not see it.
-            if(mProcess)
-            {
-                errno = 0;
-                if(ptrace(PT_THUPDATE, mProcess->pid,
-                          reinterpret_cast<caddr_t>(static_cast<uintptr_t>(thread)), 0) == -1 &&
-                   errno != 0)
-                {
-                    cbInternalError(std::string("could not suppress the step's SIGTRAP: ") +
-                                     std::strerror(errno));
-                }
-            }
+            suppressPendingSignal(thread, "the step");
 
             std::string rearmError;
             if(mStoppedAtBreakpoint != 0 && mProcess &&
@@ -627,9 +611,9 @@ namespace MachBug
            (decision == Command::Continue || decision == Command::StepInto))
         {
             std::string cycleError;
-            if(mProcess &&
-               mBreakpoints.Disarm(mProcess->task, kLoopArch, mStoppedAtBreakpoint, &cycleError) &&
-               arch::SetSingleStep(kLoopArch, thread, true, &cycleError))
+            const bool disarmed = mProcess &&
+                mBreakpoints.Disarm(mProcess->task, kLoopArch, mStoppedAtBreakpoint, &cycleError);
+            if(disarmed && arch::SetSingleStep(kLoopArch, thread, true, &cycleError))
             {
                 mStepArmed = true;
                 mSteppingOverBreakpoint = true;
@@ -637,9 +621,20 @@ namespace MachBug
                 return KERN_SUCCESS;
             }
 
-            // Neither half worked, so the breakpoint is still in the target and resuming would
-            // trap on it forever. Say so and resume anyway: a hung target is worse than a
-            // reported failure, and the caller can remove the breakpoint.
+            // The half that did work has to be undone, or the cycle leaves the target without a
+            // breakpoint the caller still believes in -- the quietest way to lose one. Arming
+            // again cannot be assumed to succeed either, so its own failure is reported rather
+            // than swallowed by the failure that caused it.
+            if(disarmed && mProcess)
+            {
+                std::string rearmError;
+                if(!mBreakpoints.Arm(mProcess->task, kLoopArch, mStoppedAtBreakpoint, &rearmError))
+                    cbInternalError("could not put the breakpoint back after failing to step off "
+                                     "it: " + rearmError);
+            }
+
+            // Resumed anyway, with the reason said out loud: the target will trap here again
+            // immediately, which is visible and recoverable, while parking it forever is neither.
             cbInternalError("could not step off the breakpoint: " + cycleError);
             mStoppedAtBreakpoint = 0;
         }
@@ -727,8 +722,19 @@ namespace MachBug
         if(mStopped.load(std::memory_order_acquire))
             return; // already stopped at an exception; nothing more to pause
 
-        if(task_suspend(mProcess->task) == KERN_SUCCESS)
-            mPausedByUser.store(true, std::memory_order_release);
+        if(task_suspend(mProcess->task) != KERN_SUCCESS)
+            return;
+
+        mPausedByUser.store(true, std::memory_order_release);
+
+        // This is a stop, so the thread list gets its look -- and this is the one stop the
+        // exception loop never hears about, which is why the call is here as well as there. The
+        // callbacks it may fire land on the caller's thread rather than the loop's; see
+        // cbThreadCreate's comment in Debugger.h for why that is written down rather than
+        // hidden. Called with mCmdMutex held, which is safe because refreshThreads() touches
+        // only mThreads and the target's port -- it takes no lock of its own and cannot re-enter
+        // anything that takes this one.
+        refreshThreads();
     }
 
     void Debugger::Stop()
@@ -751,9 +757,52 @@ namespace MachBug
         return mIsRunning.load(std::memory_order_acquire);
     }
 
+    void Debugger::suppressPendingSignal(const mach_port_t thread, const char* what)
+    {
+        if(!mProcess)
+            return;
+
+        // MEASURED. A step that this engine armed reaches the target as a passed-through SIGTRAP
+        // as well as an exception, and answering the exception with KERN_SUCCESS does not stop
+        // the delivery: the fixture died with ExitProcess(code=-5) until this call existed.
+        //
+        // Only for that case. Calling it for a raw breakpoint trap was tried and the kernel
+        // refused with EBUSY ("Resource busy"): PT_THUPDATE decides the fate of a signal that is
+        // pending for the thread, and an EXC_BREAKPOINT this engine answers has none.
+        //
+        // PT_THUPDATE decides a passed-through signal's fate: its third argument is the thread
+        // port and its fourth is the signal to deliver, so zero means deliver nothing. Every trap
+        // this engine set is its own machinery; the target never asked for it and must not see it.
+        errno = 0;
+        if(ptrace(PT_THUPDATE, mProcess->pid,
+                  reinterpret_cast<caddr_t>(static_cast<uintptr_t>(thread)), 0) == -1 &&
+           errno != 0)
+        {
+            cbInternalError(std::string("could not suppress the signal for ") + what + ": " +
+                             std::strerror(errno));
+        }
+    }
+
     Breakpoints& Debugger::BreakpointTable()
     {
         return mBreakpoints;
+    }
+
+    std::size_t Debugger::ThreadCount() const
+    {
+        return mThreads.Known().size();
+    }
+
+    void Debugger::refreshThreads()
+    {
+        if(!mProcess)
+            return;
+
+        const Threads::Change change = mThreads.Refresh(mProcess->task);
+        for(const uint64_t threadId : change.appeared)
+            cbThreadCreate(threadId);
+        for(const uint64_t threadId : change.disappeared)
+            cbThreadExit(threadId);
     }
 
     mach_port_t Debugger::StoppedThread() const
@@ -766,39 +815,20 @@ namespace MachBug
         if(threadId == 0)
             return StoppedThread();
 
-        const auto candidate = static_cast<mach_port_t>(threadId);
-        if(!mProcess || mProcess->task == MACH_PORT_NULL)
-            return MACH_PORT_NULL;
-
-        // Checked against the task's actual thread list rather than trusted: a caller handing
-        // over a stale port from a previous stop, or an outright invented number, would
-        // otherwise reach thread_get_state, which reports KERN_INVALID_ARGUMENT for a port that
-        // is not a thread and MACH_SEND_INVALID_DEST for one that is not even a port. Neither
-        // says "no such thread", which is what actually happened.
-        //
-        // This is not thread enumeration: nothing here lists threads for a caller, and every
-        // port task_threads hands over is released in the same loop.
-        thread_act_array_t threads = nullptr;
-        mach_msg_type_number_t count = 0;
-        if(task_threads(mProcess->task, &threads, &count) != KERN_SUCCESS)
-            return MACH_PORT_NULL;
-
-        mach_port_t found = MACH_PORT_NULL;
-        for(mach_msg_type_number_t i = 0; i < count; ++i)
-        {
-            if(threads[i] == candidate)
-                found = candidate;
-            mach_port_deallocate(mach_task_self(), threads[i]);
-        }
-        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads),
-                      count * sizeof(thread_act_t));
-        return found;
+        // A system thread id, not a port name. Milestone 4 measured why that distinction has to
+        // exist: task_threads mints fresh send rights on every call, so a port name identifies a
+        // thread only until the next poll -- naming threads that way reported a three-thread
+        // target as three creations and handed back ids that no longer resolved. Threads holds
+        // one right per live thread and maps the stable id onto it.
+        return mThreads.PortFor(threadId);
     }
 
     void Debugger::cbCreateProcessEvent(pid_t) {}
     void Debugger::cbExitProcessEvent(int) {}
     void Debugger::cbSystemBreakpoint() {}
     void Debugger::cbBreakpoint(uint64_t) {}
+    void Debugger::cbThreadCreate(uint64_t) {}
+    void Debugger::cbThreadExit(uint64_t) {}
     void Debugger::cbResumed() {}
     void Debugger::cbStep() {}
     void Debugger::cbException(uint32_t, uint64_t) {}

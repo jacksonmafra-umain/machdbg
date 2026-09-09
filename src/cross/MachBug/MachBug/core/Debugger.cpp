@@ -262,6 +262,10 @@ namespace MachBug
         mProcess.reset();
         mAttachedViaPtrace = false;
 
+        // The thread bookkeeping goes with the target it described: it holds one send right per
+        // live thread, and those rights belong to a task that is about to stop existing.
+        mThreads.Reset();
+
         // Process::DetachAndKill(), not a bare kill()+waitpid(): if Start() ran, or this pid was
         // taken by Attach() (which ptrace(PT_ATTACHEXC)'s it directly, without waiting for
         // Start()), this pid is ptrace(PT_ATTACHEXC)'d (Debugger.Loop.cpp::Start(), or Attach()

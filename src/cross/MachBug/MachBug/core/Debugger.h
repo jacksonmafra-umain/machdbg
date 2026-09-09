@@ -12,6 +12,7 @@
 #include <MachBug/types/MachBug.h>
 #include <MachBug/types/Global.h>
 #include <MachBug/core/Breakpoints.h>
+#include <MachBug/core/Threads.h>
 #include <MachBug/process/Process.h>
 
 namespace MachBug
@@ -178,6 +179,10 @@ namespace MachBug
         // already holding the thing that owns the target.
         Breakpoints& BreakpointTable();
 
+        // How many threads the target had at the last stop. Not a live query: the engine looks
+        // when it stops the target, because that is the only moment it can act on what it sees.
+        std::size_t ThreadCount() const;
+
         // Internal: the MIG dispatch trampoline in ExceptionServer.cpp calls this, on the same
         // thread that is running exceptionLoop(), for every Mach exception message it decodes.
         // Not for any other caller -- there is exactly one legitimate caller
@@ -234,6 +239,18 @@ namespace MachBug
         // thread raised the trap that single-stepping itself causes, rather than a fresh,
         // unrelated exception).
         virtual void cbStep();
+
+        // Fired when the engine first sees a thread that was not there at the previous stop, and
+        // when one it knew about is gone. `threadId` is a Mach thread port, the same identity
+        // ResolveThread() accepts.
+        //
+        // Fired from whichever thread observed the stop: the loop thread for an exception, and
+        // the caller's own thread for Pause(), which suspends the target synchronously and so is
+        // the one stop the loop never hears about. That is a wart, and it is written here rather
+        // than discovered: a caller that touches UI state from these must marshal, exactly as it
+        // already must for Pause() itself.
+        virtual void cbThreadCreate(uint64_t threadId);
+        virtual void cbThreadExit(uint64_t threadId);
 
         // Fired from the loop thread when the target stopped on a breakpoint this engine
         // installed. `address` is the breakpoint's own address -- the one the caller asked for,
@@ -309,6 +326,19 @@ namespace MachBug
 
         // The breakpoints this engine has installed in the target.
         Breakpoints mBreakpoints;
+
+        // The target's threads as of the last stop, and the diff that produced the last pair of
+        // callbacks.
+        Threads mThreads;
+
+        // Looks at the target's thread list and fires cbThreadCreate/cbThreadExit for what
+        // changed. Called at every stop this engine creates -- see cbThreadCreate's comment for
+        // which thread that leaves the callbacks on.
+        void refreshThreads();
+
+        // Tells the kernel not to deliver the signal that accompanies a trap this engine caused.
+        // See the implementation for the two failures that made it necessary.
+        void suppressPendingSignal(mach_port_t thread, const char* what);
 
         // Loop-thread only. The breakpoint the target is currently stopped on, or 0: resuming
         // from it needs the trap taken out first, and this is what remembers which one to put
