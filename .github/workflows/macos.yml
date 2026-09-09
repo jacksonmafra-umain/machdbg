@@ -41,6 +41,12 @@ jobs:
         working-directory: src/cross
         run: cmake --build build/macos-arm64 --target hex_viewer minidump remote_table release_notes
 
+      # These run as the ordinary runner user, deliberately. Milestone 0 assumed engine
+      # tests would need root, because task_for_pid usually does. Milestone 2 task 1
+      # measured otherwise: a same-user caller reaches a target signed with
+      # get-task-allow without any entitlement or elevation, and every fixture is signed
+      # that way at build time. Do not add sudo here -- it would hide a real regression
+      # in the fixtures' signing behind elevated privilege.
       - name: Build the contract tests
         working-directory: src/cross
         run: cmake --build build/macos-arm64 --target MachBug_tests
