@@ -37,9 +37,12 @@ jobs:
         working-directory: src/cross
         run: cmake --preset macos-arm64 -DMACHBUG_BUILD_TESTS=ON
 
+      # regview is in this list because check-bundles.sh and smoke-launch.sh both cover it now:
+      # a bundle that is checked but never built fails as "has no executable", which is what
+      # adding it to those scripts without adding it here produced.
       - name: Build the Qt samples
         working-directory: src/cross
-        run: cmake --build build/macos-arm64 --target hex_viewer minidump remote_table release_notes
+        run: cmake --build build/macos-arm64 --target hex_viewer minidump remote_table release_notes regview
 
       # These run as the ordinary runner user, deliberately. Milestone 0 assumed engine
       # tests would need root, because task_for_pid usually does. Milestone 2 task 1
