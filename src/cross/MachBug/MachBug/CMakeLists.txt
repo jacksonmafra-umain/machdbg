@@ -37,6 +37,8 @@ set(MachBug_SOURCES
 	"arch/X86_64.cpp"
 	"arch/X86_64.h"
 	cmake.toml
+	"core/Breakpoints.cpp"
+	"core/Breakpoints.h"
 	"core/Debugger.Loop.cpp"
 	"core/Debugger.cpp"
 	"core/Debugger.h"

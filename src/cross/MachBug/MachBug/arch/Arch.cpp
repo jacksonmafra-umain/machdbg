@@ -1,5 +1,7 @@
 #include <MachBug/arch/Arch.h>
 
+#include <cstdint>
+
 #include <MachBug/arch/Arm64.h>
 #include <MachBug/arch/X86_64.h>
 
@@ -52,6 +54,25 @@ namespace MachBug::arch
             if(error)
                 *error = "no register file for this architecture in this build";
             return false;
+        }
+    }
+
+    Trap SoftwareTrap(const DbgArch arch)
+    {
+        // Little-endian bytes of 0xD4200000. Written as bytes rather than as a uint32_t so the
+        // memory write is byte-order-explicit at the point it is defined, not at the point it is
+        // used.
+        static const uint8_t kBrk0[4] = {0x00, 0x00, 0x20, 0xD4};
+        static const uint8_t kInt3[1] = {0xCC};
+
+        switch(arch)
+        {
+        case DbgArch_Arm64:
+            return Trap{kBrk0, 4, 4};
+        case DbgArch_X86_64:
+            return Trap{kInt3, 1, 1};
+        default:
+            return Trap{nullptr, 0, 0};
         }
     }
 
