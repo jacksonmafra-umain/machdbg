@@ -157,6 +157,20 @@ namespace MachBug
         // True from the start of Start() until its exceptionLoop() returns.
         bool IsRunning() const;
 
+        // The thread port that raised the exception the target is currently parked on, or
+        // MACH_PORT_NULL when nothing is parked. Registers are per-thread and this milestone has
+        // no thread enumeration (task_threads is milestone 5), so this port -- handed to
+        // handleException() by MIG and recorded there -- is the only thread identity the engine
+        // has. It is valid for exactly as long as the stop is: cleared when the reply goes out.
+        mach_port_t StoppedThread() const;
+
+        // Turns the C API's threadId into a thread port. threadId 0 means "the thread stopped at
+        // the current exception" -- the case a register view has, since a caller reading
+        // registers is by definition looking at a stop. Any other value is taken as a
+        // mach_port_t and checked against the target's threads before being returned, so a stale
+        // or invented id resolves to MACH_PORT_NULL rather than reaching thread_get_state.
+        mach_port_t ResolveThread(uint64_t threadId) const;
+
         // Internal: the MIG dispatch trampoline in ExceptionServer.cpp calls this, on the same
         // thread that is running exceptionLoop(), for every Mach exception message it decodes.
         // Not for any other caller -- there is exactly one legitimate caller
@@ -260,6 +274,11 @@ namespace MachBug
         // reply is pending. Loop-thread writes, any-thread reads -- Continue()/StepInto() read
         // it (under mCmdMutex) to decide whether there is anything parked to hand a decision to.
         std::atomic<bool> mStopped{false};
+
+        // Written by handleException() on the loop thread, read by any thread through
+        // StoppedThread()/ResolveThread(). Atomic for the same reason mStopped is: the reader is
+        // usually a UI thread and the writer is always the loop thread.
+        std::atomic<mach_port_t> mStoppedThread{MACH_PORT_NULL};
 
         // True while Pause() has task_suspended the task directly (no parked handleException()
         // to route the pause through). Continue() clears it with a matching task_resume() when
