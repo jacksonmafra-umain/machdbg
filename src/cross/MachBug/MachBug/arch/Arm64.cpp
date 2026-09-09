@@ -1,6 +1,7 @@
 #include <MachBug/arch/Arm64.h>
 
 #include <mach/mach_error.h>
+#include <mach/exception_types.h>
 #include <mach/thread_status.h>
 
 #include <cstddef>
@@ -84,6 +85,22 @@ namespace MachBug::arch::Arm64
             return true;
         }
 #endif // defined(__arm64__) || defined(__aarch64__)
+    }
+
+
+    bool IsSingleStepTrap(const exception_type_t exception, const int64_t* code,
+                          const uint32_t codeCnt)
+    {
+        // EXC_ARM_BREAKPOINT (1) is what both a completed single-step and a BRK instruction
+        // arrive as on arm64 -- the subcode does not separate them, so this is a necessary
+        // condition and the breakpoint table is what makes it sufficient. It still rules out the
+        // case that actually bit: a signal passthrough (EXC_SOFTWARE) being mistaken for a step.
+        // Spelled out for the same reason its x86-64 twin is: mach/arm/exception.h is gated on
+        // __arm__ || __arm64__, and an x86-64 build still compiles this file's classification.
+        // mach/arm/exception.h:83.
+        constexpr int64_t kExcArmBreakpoint = 1;
+        return exception == EXC_BREAKPOINT && codeCnt >= 1 && code != nullptr &&
+               code[0] == kExcArmBreakpoint;
     }
 
     const DbgRegisterDesc* Descriptors(uint32_t* count)

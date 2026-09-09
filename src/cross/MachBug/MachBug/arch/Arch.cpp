@@ -55,6 +55,20 @@ namespace MachBug::arch
         }
     }
 
+    bool IsSingleStepTrap(const DbgArch arch, const exception_type_t exception,
+                          const int64_t* code, const uint32_t codeCnt)
+    {
+        switch(arch)
+        {
+        case DbgArch_Arm64:
+            return Arm64::IsSingleStepTrap(exception, code, codeCnt);
+        case DbgArch_X86_64:
+            return X86_64::IsSingleStepTrap(exception, code, codeCnt);
+        default:
+            return false;
+        }
+    }
+
     bool SetSingleStep(const DbgArch arch, const mach_port_t thread, const bool enable,
                        std::string* error)
     {

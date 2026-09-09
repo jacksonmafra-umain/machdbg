@@ -1,6 +1,7 @@
 #include <MachBug/arch/X86_64.h>
 
 #include <mach/mach_error.h>
+#include <mach/exception_types.h>
 #include <mach/thread_status.h>
 
 #include <cstddef>
@@ -132,6 +133,22 @@ namespace MachBug::arch::X86_64
             return true;
         }
 #endif // defined(__x86_64__)
+    }
+
+
+    bool IsSingleStepTrap(const exception_type_t exception, const int64_t* code,
+                          const uint32_t codeCnt)
+    {
+        // x86-64 does separate them: EXC_I386_SGL (1) is the trap-flag single step and
+        // EXC_I386_BPT (2) is an int3, so on this architecture the classification is exact.
+        //
+        // The value is spelled out rather than included: mach/i386/exception.h is gated on
+        // __i386__ || __x86_64__ and this predicate has to compile on an arm64 host, which is
+        // where the dispatch that calls it is built. It is an ABI constant, not a host-dependent
+        // one -- mach/i386/exception.h:108.
+        constexpr int64_t kExcI386SingleStep = 1;
+        return exception == EXC_BREAKPOINT && codeCnt >= 1 && code != nullptr &&
+               code[0] == kExcI386SingleStep;
     }
 
     const DbgRegisterDesc* Descriptors(uint32_t* count)

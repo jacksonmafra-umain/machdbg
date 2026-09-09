@@ -423,8 +423,18 @@ namespace MachBug
         // parking, and the park (the mCmdCv.wait() further down) is the entire reason the
         // target does not run again until Continue()/StepInto()/Stop() says so.
 
-        const bool wasStepCompletion = mStepArmed;
-        mStepArmed = false;
+        // A step is complete when a step was armed AND this exception is the trap a step
+        // produces. Testing mStepArmed alone -- which is what this did until milestone 4 --
+        // reports the *next* exception of any kind as a completed step: on x86-64 a signal
+        // passthrough arrived first and was announced as a step whose program counter had not
+        // moved, which is a lie about the target rather than a missed event (issue #97).
+        //
+        // mStepArmed survives an exception that is not the step: the step may still land later,
+        // and forgetting it would leave the trap armed with nothing waiting for it.
+        const bool wasStepCompletion = mStepArmed &&
+            arch::IsSingleStepTrap(kLoopArch, exception, code, codeCnt);
+        if(wasStepCompletion)
+            mStepArmed = false;
         if(wasStepCompletion)
         {
             // Disarmed through the arch layer (arch/Arm64.cpp, arch/X86_64.cpp) rather than here;

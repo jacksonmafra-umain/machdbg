@@ -43,6 +43,13 @@ namespace MachBug::arch::Arm64
     // like every other piece of debug state on this platform.
     bool SetSingleStep(mach_port_t thread, bool enable, std::string* error);
 
+    // Whether an exception is the trap a single-step produces. Needed because arming a step and
+    // then treating the *next* exception as its completion is wrong: a signal passthrough can
+    // arrive first, and reporting that as a completed step tells a caller the target advanced
+    // when it did not.
+    bool IsSingleStepTrap(exception_type_t exception, const int64_t* code,
+                          uint32_t codeCnt);
+
     // Removes an arm64e pointer-authentication signature from a code address. See the comment on
     // the implementation for what was measured about when a signature is actually present.
     uint64_t StripPointerAuth(uint64_t address);

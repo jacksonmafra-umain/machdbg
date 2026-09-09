@@ -32,6 +32,32 @@ namespace
         return regs.x86_64.rip;
 #endif
     }
+
+    // What the engine actually reported, in order. A step that does not arrive is far easier to
+    // diagnose from the timeline than from a bare "WaitFor returned false" -- and on a machine
+    // nobody owns, the CI log is the only place that diagnosis can happen (issue #97 was read out
+    // of exactly this kind of output).
+    std::string timeline(const RecordingDebugger& debugger)
+    {
+        std::string out;
+        for(const MachBug::test::Event& event : debugger.events())
+        {
+            switch(event.type)
+            {
+            case EventType::CreateProcess: out += "CreateProcess "; break;
+            case EventType::ExitProcess: out += "ExitProcess "; break;
+            case EventType::SystemBreakpoint: out += "SystemBreakpoint "; break;
+            case EventType::Resumed: out += "Resumed "; break;
+            case EventType::Step: out += "Step "; break;
+            case EventType::Exception:
+                out += "Exception(type=" + std::to_string(event.exceptionType) +
+                       ",address=" + std::to_string(event.address) + ") ";
+                break;
+            case EventType::InternalError: out += "InternalError(" + event.message + ") "; break;
+            }
+        }
+        return out;
+    }
 }
 
 TEST_CASE("a step advances the program counter and leaves the target stopped")
@@ -46,7 +72,9 @@ TEST_CASE("a step advances the program counter and leaves the target stopped")
     REQUIRE(MachBug::arch::Read(kHostArch, debugger.ResolveThread(0), &before, &error));
 
     debugger.StepInto();
-    REQUIRE(debugger.WaitFor(EventType::Step));
+    const bool stepped = debugger.WaitFor(EventType::Step);
+    INFO("timeline: " << timeline(debugger));
+    REQUIRE(stepped);
     REQUIRE(debugger.IsStopped());
 
     DbgRegisters after{};
