@@ -380,6 +380,7 @@ namespace
     {
         std::atomic<bool> created{false};
         std::atomic<pid_t> createdPid{0};
+        std::atomic<bool> resumed{false};
         std::atomic<bool> startReturned{false};
         std::atomic<int> startResult{-1};
         std::mutex errorMutex;
@@ -407,6 +408,16 @@ namespace
         auto* h = static_cast<AttachHarness*>(userdata);
         if(h->engine)
             h->engine->Continue(h->engine->impl);
+    }
+
+    // The engine reports this once the reply that answers a stop has actually been sent, which
+    // is what resumes the target thread (cbResumed() in core/Debugger.h) -- here, the reply the
+    // Continue() above decided on. It is the signal that the attached target is running for
+    // real, which nothing else in this vtable can tell a caller.
+    void onResumed(void* userdata)
+    {
+        auto* h = static_cast<AttachHarness*>(userdata);
+        h->resumed.store(true, std::memory_order_release);
     }
 
     // Wired for diagnostics only: if Attach() fails, the assertions below would otherwise report
@@ -445,6 +456,7 @@ TEST_CASE("attach takes control of a process machdbg did not launch, and Stop te
     DbgEngineCallbacks callbacks{};
     callbacks.onCreateProcess = onCreateProcess;
     callbacks.onSystemBreakpoint = onSystemBreakpoint;
+    callbacks.onResumed = onResumed;
     callbacks.onError = onError;
     callbacks.userdata = &harness;
 
@@ -482,15 +494,17 @@ TEST_CASE("attach takes control of a process machdbg did not launch, and Stop te
     const bool created = harness.created.load(std::memory_order_acquire);
     const pid_t createdPid = harness.createdPid.load(std::memory_order_acquire);
 
-    if(created)
-    {
-        // A moment for the SIGCONT-turned-exception to actually arrive, for onSystemBreakpoint
-        // (above) to call Continue() in response, and for run_endlessly to resume running freely
-        // -- same margin exception_loop.cpp's own Stop()-while-running test gives a launched
-        // target, so Stop() below exercises a live target, not one still parked at its first
-        // stop or mid-resume.
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    }
+    // Waits for the SIGCONT-turned-exception to arrive, for onSystemBreakpoint (above) to answer
+    // it with Continue(), and for that reply to have gone out -- onResumed is the engine's report
+    // that the last of those has happened and run_endlessly is running freely again, so Stop()
+    // below exercises a live target rather than one still parked at its first stop or mid-resume.
+    // The same wait exception_loop.cpp's Stop()-while-running test makes on EventType::Resumed,
+    // through the C vtable instead of the harness. Unbounded polling is not an option here: this
+    // whole block runs while `startThread` is still joinable, so it records a bool for the
+    // REQUIRE that follows the join rather than asserting in place.
+    for(int i = 0; created && i < 500 && !harness.resumed.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool resumed = harness.resumed.load(std::memory_order_acquire);
     // Stop() is harmless (and idempotent) to call here regardless of `created`: if attach never
     // got that far, Start() has either already returned (Stop() then reports DbgStatus_NotAttached,
     // ignored below) or is stuck somewhere Stop() cannot reach -- either way, the bounded join
@@ -524,6 +538,7 @@ TEST_CASE("attach takes control of a process machdbg did not launch, and Stop te
     REQUIRE(finished);
     REQUIRE(created);
     REQUIRE(createdPid == targetPid);
+    REQUIRE(resumed);
     REQUIRE(engine->GetPid(engine->impl) == targetPid);
     REQUIRE(startResult == DbgStatus_Ok);
 
