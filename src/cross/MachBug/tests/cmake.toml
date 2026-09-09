@@ -57,6 +57,11 @@ sources = ["targets/multi_threaded.cpp"]
 link-libraries = ["Threads::Threads"]
 properties.OUTPUT_NAME = "multi_threaded"
 
+[target.machbug_fixture_known_globals]
+type = "machbug_fixture"
+sources = ["targets/known_globals.cpp"]
+properties.OUTPUT_NAME = "known_globals"
+
 [target.machbug_fixture_crash_bad_access]
 type = "machbug_fixture"
 sources = ["targets/crash_bad_access.cpp"]
@@ -87,7 +92,7 @@ properties.OUTPUT_NAME = "no_get_task_allow"
 
 [target.MachBug_tests]
 type = "executable"
-sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp", "mig_exception_server.cpp", "debugger_launch.cpp", "exception_loop.cpp", "test_harness.cpp", "thread_resolution.cpp", "registers_arm64.cpp", "registers_x86_64.cpp"]
+sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp", "mig_exception_server.cpp", "debugger_launch.cpp", "exception_loop.cpp", "test_harness.cpp", "thread_resolution.cpp", "registers_arm64.cpp", "registers_x86_64.cpp", "memory.cpp"]
 headers = ["TestHarness.h"]
 compile-features = ["cxx_std_17"]
 include-directories = ["../"]
@@ -112,6 +117,7 @@ add_dependencies(MachBug_tests
     machbug_fixture_exit_code_42
     machbug_fixture_hello_machbug
     machbug_fixture_run_endlessly
+    machbug_fixture_known_globals
     machbug_fixture_multi_threaded
     machbug_fixture_crash_bad_access
     machbug_fixture_no_get_task_allow

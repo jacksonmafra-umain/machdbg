@@ -41,6 +41,8 @@ set(MachBug_SOURCES
 	"core/Debugger.cpp"
 	"core/Debugger.h"
 	"core/ExceptionServer.cpp"
+	"memory/Memory.cpp"
+	"memory/Memory.h"
 	"process/Process.cpp"
 	"process/Process.h"
 	"types/Global.h"

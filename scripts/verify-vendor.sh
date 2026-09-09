@@ -67,6 +67,10 @@ required=(
     src/cross/MachBug/MachBug/arch/X86_64.h
     src/cross/MachBug/MachBug/arch/X86_64.cpp
     src/cross/MachBug/tests/registers_x86_64.cpp
+    src/cross/MachBug/tests/memory.cpp
+    src/cross/MachBug/tests/targets/known_globals.cpp
+    src/cross/MachBug/MachBug/memory/Memory.h
+    src/cross/MachBug/MachBug/memory/Memory.cpp
     src/cross/MachBug/MachBug/cmake.toml
     src/cross/MachBug/MachBug/CMakeLists.txt
     src/cross/MachBug/MachBug/types/MachBug.h

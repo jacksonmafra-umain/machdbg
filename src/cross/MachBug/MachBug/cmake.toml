@@ -13,8 +13,8 @@ languages = ["CXX"]
 
 [target.MachBug]
 type = "static"
-sources = ["process/*.cpp", "core/*.cpp", "api/*.cpp", "arch/*.cpp"]
-headers = ["types/*.h", "process/*.h", "core/*.h", "api/*.h", "arch/*.h"]
+sources = ["process/*.cpp", "core/*.cpp", "api/*.cpp", "arch/*.cpp", "memory/*.cpp"]
+headers = ["types/*.h", "process/*.h", "core/*.h", "api/*.h", "arch/*.h", "memory/*.h"]
 compile-features = ["cxx_std_17"]
 include-directories = ["../"]
 # MachBugMig.cmake is included (and its machbug_mig target defined) here, in the library that
