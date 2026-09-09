@@ -67,6 +67,8 @@ namespace MachBug::test
         Resumed,
         Step,
         Breakpoint,
+        ThreadCreate,
+        ThreadExit,
         Exception,
         InternalError,
     };
@@ -84,6 +86,9 @@ namespace MachBug::test
         // is rather than reusing ElfBug's field name for something different.
         uint32_t exceptionType = 0;
         uint64_t address = 0;
+        // Populated only for ThreadCreate/ThreadExit: the id the engine reports, which is a Mach
+        // thread port and is what ResolveThread() accepts.
+        uint64_t threadId = 0;
         std::string message;
     };
 
@@ -236,12 +241,12 @@ namespace MachBug::test
     protected:
         void cbInternalError(const std::string & error) override
         {
-            push({EventType::InternalError, {}, 0, 0, 0, 0, error});
+            push({EventType::InternalError, {}, 0, 0, 0, 0, 0, error});
         }
 
         void cbCreateProcessEvent(pid_t pid) override
         {
-            push({EventType::CreateProcess, {}, pid, 0, 0, 0, {}});
+            push({EventType::CreateProcess, {}, pid, 0, 0, 0, 0, {}});
         }
 
         void cbExitProcessEvent(int exitCode) override
@@ -250,32 +255,42 @@ namespace MachBug::test
                 std::lock_guard lock(mMutex);
                 mExitCode = exitCode;
             }
-            push({EventType::ExitProcess, {}, 0, exitCode, 0, 0, {}});
+            push({EventType::ExitProcess, {}, 0, exitCode, 0, 0, 0, {}});
         }
 
         void cbSystemBreakpoint() override
         {
-            push({EventType::SystemBreakpoint, {}, 0, 0, 0, 0, {}});
+            push({EventType::SystemBreakpoint, {}, 0, 0, 0, 0, 0, {}});
         }
 
         void cbResumed() override
         {
-            push({EventType::Resumed, {}, 0, 0, 0, 0, {}});
+            push({EventType::Resumed, {}, 0, 0, 0, 0, 0, {}});
         }
 
         void cbBreakpoint(uint64_t address) override
         {
-            push({EventType::Breakpoint, {}, 0, 0, 0, address, {}});
+            push({EventType::Breakpoint, {}, 0, 0, 0, address, 0, {}});
+        }
+
+        void cbThreadCreate(uint64_t threadId) override
+        {
+            push({EventType::ThreadCreate, {}, 0, 0, 0, 0, threadId, {}});
+        }
+
+        void cbThreadExit(uint64_t threadId) override
+        {
+            push({EventType::ThreadExit, {}, 0, 0, 0, 0, threadId, {}});
         }
 
         void cbStep() override
         {
-            push({EventType::Step, {}, 0, 0, 0, 0, {}});
+            push({EventType::Step, {}, 0, 0, 0, 0, 0, {}});
         }
 
         void cbException(uint32_t type, uint64_t address) override
         {
-            push({EventType::Exception, {}, 0, 0, type, address, {}});
+            push({EventType::Exception, {}, 0, 0, type, address, 0, {}});
         }
 
     private:

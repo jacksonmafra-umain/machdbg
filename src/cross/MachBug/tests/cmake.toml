@@ -97,7 +97,7 @@ properties.OUTPUT_NAME = "no_get_task_allow"
 
 [target.MachBug_tests]
 type = "executable"
-sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp", "mig_exception_server.cpp", "debugger_launch.cpp", "exception_loop.cpp", "test_harness.cpp", "thread_resolution.cpp", "registers_arm64.cpp", "registers_x86_64.cpp", "memory.cpp", "register_format.cpp", "stepping.cpp", "breakpoints_software.cpp"]
+sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp", "mig_exception_server.cpp", "debugger_launch.cpp", "exception_loop.cpp", "test_harness.cpp", "thread_resolution.cpp", "registers_arm64.cpp", "registers_x86_64.cpp", "memory.cpp", "register_format.cpp", "stepping.cpp", "breakpoints_software.cpp", "threads.cpp"]
 headers = ["TestHarness.h"]
 compile-features = ["cxx_std_17"]
 # ../ for MachBug/... includes, ../../ for <views/RegisterFormat.h>: the Qt-free half of the

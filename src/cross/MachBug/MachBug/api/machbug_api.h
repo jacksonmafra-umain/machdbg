@@ -133,6 +133,11 @@ typedef void (*DbgCbError)(const char* error, void* userdata);
 typedef void (*DbgCbDebugString)(const char* text, void* userdata);
 typedef void (*DbgCbLoadModule)(uint64_t base, const char* path, void* userdata);
 typedef void (*DbgCbUnloadModule)(uint64_t base, void* userdata);
+/* threadId, everywhere it appears in this contract, is a stable per-thread identity that lives
+   as long as the thread does -- on macOS, the system thread id. It is deliberately not a Mach
+   port name: those are minted afresh by every task_threads call, so a port-shaped id names a
+   thread only until the next time anyone looks. Passing 0 to GetRegisters/SetRegister means the
+   thread the target is currently stopped on. */
 typedef void (*DbgCbThreadCreate)(uint64_t threadId, void* userdata);
 typedef void (*DbgCbThreadExit)(uint64_t threadId, void* userdata);
 typedef void (*DbgCbException)(uint32_t type, uint64_t address, void* userdata);
