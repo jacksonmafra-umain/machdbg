@@ -36,4 +36,21 @@ namespace MachBug::arch
     // is what tells them apart.
     bool IsSingleStepTrap(DbgArch arch, exception_type_t exception, const int64_t* code,
                           uint32_t codeCnt);
+
+    // The software trap for an architecture: the bytes to write, how many, and the alignment an
+    // address must satisfy to hold them. arm64's BRK #0 is 0xD4200000 and must sit on a 4-byte
+    // boundary because every arm64 instruction does; x86-64's INT3 is one byte and needs none.
+    // Verified with the assembler rather than quoted from memory -- `as -arch arm64` on `brk #0`
+    // emits d4200000, and `int3` emits cc.
+    //
+    // An architecture this engine has no trap for gets a zero size, so a caller cannot patch a
+    // target with an empty or borrowed encoding.
+    struct Trap
+    {
+        const uint8_t* bytes;
+        uint32_t size;
+        uint32_t alignment;
+    };
+
+    Trap SoftwareTrap(DbgArch arch);
 }

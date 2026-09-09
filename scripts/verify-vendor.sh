@@ -70,6 +70,10 @@ required=(
     src/cross/MachBug/tests/memory.cpp
     src/cross/MachBug/tests/register_format.cpp
     src/cross/MachBug/tests/stepping.cpp
+    src/cross/MachBug/tests/breakpoints_software.cpp
+    src/cross/MachBug/tests/targets/known_function.cpp
+    src/cross/MachBug/MachBug/core/Breakpoints.h
+    src/cross/MachBug/MachBug/core/Breakpoints.cpp
     src/cross/views/cmake.toml
     src/cross/views/CMakeLists.txt
     src/cross/views/RegisterFormat.h
