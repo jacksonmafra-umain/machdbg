@@ -239,6 +239,93 @@ TEST_CASE("the engine launches and runs a target through the C contract")
     MachBugDestroy(engine);
 }
 
+namespace
+{
+    // Records that onSystemBreakpoint fired and, deliberately, does nothing else -- unlike
+    // continueOnSystemBreakpoint above, this callback never calls Continue(). That silence is
+    // the point: it is what lets the test below observe the target still parked, not resumed
+    // for it by anything in this file or in machbug_api.cpp.
+    struct ParkingProbe
+    {
+        std::atomic<bool> hit{false};
+    };
+
+    void recordSystemBreakpoint(void* userdata)
+    {
+        static_cast<ParkingProbe*>(userdata)->hit.store(true, std::memory_order_release);
+    }
+}
+
+// Commits the property Decision 2 (machbug_api.cpp's header comment) rests on: the vtable leaves
+// a target's first stop parked until a caller calls Continue(), rather than deciding on the
+// caller's behalf that the answer is always "run" (which an earlier version of this PR did, and
+// a reviewer caught precisely because nothing in this suite would have noticed a regression back
+// to it -- every other test here wires onSystemBreakpoint straight to Continue()). Without this
+// test, a future change that reinstated auto-resume would pass the entire suite.
+TEST_CASE("the target stays parked at its first stop until Continue() is called")
+{
+    ParkingProbe probe;
+    DbgEngineCallbacks callbacks{};
+    callbacks.onSystemBreakpoint = recordSystemBreakpoint;
+    callbacks.userdata = &probe;
+
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+
+    DbgLaunchSpec spec{};
+    spec.path = MACHBUG_TESTS_TARGETS_DIR "/exit_code_42";
+
+    // Start() blocks for the target's whole life and nothing here ever resumes it until this
+    // test says so explicitly, below -- exactly why this needs its own thread, the same shape
+    // the attach test further down uses.
+    std::atomic<bool> startReturned{false};
+    std::atomic<int> startResult{-1};
+    std::thread startThread([&] {
+        const DbgStatus result = engine->Start(engine->impl, &spec);
+        startResult.store(static_cast<int>(result), std::memory_order_release);
+        startReturned.store(true, std::memory_order_release);
+    });
+
+    for(int i = 0; i < 500 && !probe.hit.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(probe.hit.load(std::memory_order_acquire));
+
+    const pid_t pid = engine->GetPid(engine->impl);
+    REQUIRE(pid > 0);
+
+    // Two full seconds parked with no Continue() call -- long enough that a regression back to
+    // auto-resume (or any other path that lets the target run without being asked) would already
+    // have let exit_code_42 finish and exit by now. Neither observable should have moved:
+    // Start() must not have returned, and the process itself must still exist.
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+
+    REQUIRE_FALSE(startReturned.load(std::memory_order_acquire));
+
+    errno = 0;
+    const int aliveCheck = kill(pid, 0);
+    INFO("kill(pid, 0) returned " << aliveCheck << ", errno " << errno << " (" << strerror(errno)
+         << ") -- expected 0: the target should still be alive, parked at its first stop");
+    REQUIRE(aliveCheck == 0);
+
+    // Now resume, and confirm it actually runs to completion -- the other half of the property:
+    // parking is not a hang, Continue() genuinely lets it go.
+    REQUIRE(engine->Continue(engine->impl) == DbgStatus_Ok);
+
+    bool finished = false;
+    for(int i = 0; i < 500 && !startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    finished = startReturned.load(std::memory_order_acquire);
+    if(finished)
+        startThread.join();
+    else
+        startThread.detach(); // see the attach test below for why detach, not a bare join()
+
+    REQUIRE(finished);
+    REQUIRE(static_cast<DbgStatus>(startResult.load(std::memory_order_acquire)) == DbgStatus_Ok);
+
+    MachBugDestroy(engine);
+}
+
 // GetPid() alone is stale here on purpose (MachBug::Debugger does not reset mProcess just
 // because its loop ended -- see machbug_api.cpp's classifyCommandTarget() comment), so this
 // pins the gating that keeps that staleness from being mistaken for "the command succeeded":
