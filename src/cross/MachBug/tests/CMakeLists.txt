@@ -311,6 +311,7 @@ set(MachBug_tests_SOURCES
 	debugger_launch.cpp
 	exception_loop.cpp
 	mig_exception_server.cpp
+	registers_arm64.cpp
 	targets_signed.cpp
 	test_harness.cpp
 	thread_resolution.cpp
