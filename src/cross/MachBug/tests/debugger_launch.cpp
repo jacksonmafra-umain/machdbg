@@ -115,7 +115,13 @@ TEST_CASE("a suspended launch produces no output until resumed")
     // There is no Continue() at this stage of the milestone -- resume by hand, the same way
     // Task 4's exception loop will eventually resume the child after installing exception ports.
     REQUIRE(kill(debugger.GetPid(), SIGCONT) == 0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    // Polls the condition the assertion below is about, rather than sleeping a fixed margin and
+    // hoping: a resumed hello_machbug writes within milliseconds, so this returns as fast as the
+    // sleep it replaces did on a good run, and gives a loaded machine five seconds before it
+    // reports a failure that was never about scheduling latency.
+    for(int i = 0; i < 500 && fileSize(outPath) == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     INFO("hello_machbug wrote " << fileSize(outPath) << " byte(s) after SIGCONT -- expected "
          "output ('hello machbug\\n'). Zero here means resuming the child did not let it run, "
