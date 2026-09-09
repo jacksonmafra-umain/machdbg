@@ -753,7 +753,7 @@ Same shape as Task 2, different flavor and field names. It is a separate task be
 gh issue create --repo jacksonmafra-umain/machdbg \
   --title "Read and write x86-64 general registers" \
   --assignee jacksonmafra-umain --milestone "M3 Registers and memory" \
-  --label "type:feature,area:machbug,area:x86_64,prio:high" \
+  --label "type:feature,area:machbug,arch:x86_64,prio:high" \
   --body "x86_THREAD_STATE64 (flavor 4) mapped into DbgRegsX86_64, its descriptor table, and the arch dispatch that keeps machbug_api.cpp free of architecture branches.
 
 This is the half of the milestone that cannot be run on the owner's hardware. It is proven on the macos-15-intel runner, which milestone 1 confirmed exists and reports x86_64 -- the engine tests currently build and run only in the Apple Silicon job, and task 8 of this milestone adds them to the Intel one. Until that lands, an x86-64 assertion is compiled but unproven; say so in the pull request rather than implying otherwise."
@@ -1158,7 +1158,7 @@ git add -A && git commit -m "Read and write x86-64 general registers"
 git push -u origin feat/machbug-x86-registers
 gh pr create --base main --title "Read and write x86-64 general registers" \
   --assignee jacksonmafra-umain --milestone "M3 Registers and memory" \
-  --label "type:feature,area:machbug,area:x86_64,prio:high" \
+  --label "type:feature,area:machbug,arch:x86_64,prio:high" \
   --body "Closes #<issue>.
 
 x86_THREAD_STATE64 mapped into DbgRegsX86_64, its descriptor table, and MachBug::arch's dispatch so nothing above the C API branches on DbgArch.
@@ -2223,7 +2223,7 @@ Branch `feat/regview-app`. The pull request body carries the screenshot and the 
 gh issue create --repo jacksonmafra-umain/machdbg \
   --title "Run the MachBug engine tests on the Intel runner" \
   --assignee jacksonmafra-umain --milestone "M3 Registers and memory" \
-  --label "type:chore,area:build,area:x86_64,prio:high" \
+  --label "type:chore,area:build,arch:x86_64,prio:high" \
   --body "The engine tests build and run only in the Apple Silicon job. Milestone 3's x86-64 register code is therefore compiled but unproven, and 'both architectures' in the milestone's definition is currently an assertion rather than a result.
 
 The macos-15-intel image exists and reports x86_64 (milestone 1 measured it, answering research question 3). Build and run MachBug_tests there with the same -DMACHBUG_BUILD_TESTS=ON step and the same wall-clock timeout the Apple Silicon job uses, as the ordinary runner user with no sudo -- the fixtures are signed with get-task-allow at build time, which is what task_for_pid needs (milestone 2 task 1).
@@ -2240,7 +2240,7 @@ Mirror the Apple Silicon job's three steps — configure with `-DMACHBUG_BUILD_T
 ```bash
 gh pr create --base main --title "Run the MachBug engine tests on the Intel runner" \
   --assignee jacksonmafra-umain --milestone "M3 Registers and memory" \
-  --label "type:chore,area:build,area:x86_64,prio:high" \
+  --label "type:chore,area:build,arch:x86_64,prio:high" \
   --body "Closes #<issue>.
 
 <fill in: the Intel job's test summary line, and whether the three x86-64 register cases passed>"
