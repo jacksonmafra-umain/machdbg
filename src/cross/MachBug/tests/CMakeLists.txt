@@ -304,6 +304,7 @@ add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
 
 # Target: MachBug_tests
 set(MachBug_tests_SOURCES
+	TestHarness.h
 	api_contract.cpp
 	api_contract_c.c
 	cmake.toml
@@ -311,6 +312,7 @@ set(MachBug_tests_SOURCES
 	exception_loop.cpp
 	mig_exception_server.cpp
 	targets_signed.cpp
+	test_harness.cpp
 )
 
 add_executable(MachBug_tests)

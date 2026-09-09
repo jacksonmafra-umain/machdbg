@@ -1,21 +1,21 @@
 #include <catch2/catch_test_macros.hpp>
 #include <MachBug/core/Debugger.h>
 
-#include <atomic>
+#include "TestHarness.h"
+
 #include <cerrno>
-#include <chrono>
-#include <condition_variable>
 #include <csignal>
 #include <cstdio>
 #include <fcntl.h>
-#include <mutex>
-#include <queue>
 #include <string>
 #include <sys/stat.h>
 #include <thread>
 #include <unistd.h>
 
 #define FIXTURE(name) (std::string(MACHBUG_TESTS_TARGETS_DIR "/") + (name))
+
+using MachBug::test::EventType;
+using MachBug::test::RecordingDebugger;
 
 namespace
 {
@@ -26,125 +26,15 @@ namespace
             return -1;
         return static_cast<long>(st.st_size);
     }
-
-    // TEMPORARY, task 5 replaces this: the task 4 brief anticipates that the real recording
-    // harness (MachBug::test::RecordingDebugger, mirroring ElfBug/tests/TestHarness.h) is task
-    // 5's own deliverable and would not exist yet when this test is written. Rather than commit
-    // a test that fails to compile until task 5 lands, this file carries its own minimal
-    // recorder -- deliberately NOT named MachBug::test::RecordingDebugger and NOT living in a
-    // shared header, so task 5 can add the real one without colliding with this file. Delete
-    // LocalRecordingDebugger (and switch these TEST_CASEs to the real harness) once task 5 lands
-    // instead of trying to reconcile the two.
-    enum class EventType
-    {
-        SystemBreakpoint,
-        ExitProcess,
-    };
-
-    class LocalRecordingDebugger : public MachBug::Debugger
-    {
-    public:
-        ~LocalRecordingDebugger() override
-        {
-            // Stop() + join() must happen here, in the derived destructor, before ~Debugger()
-            // (which calls Terminate()) runs -- see the ordering note on ~Debugger() in
-            // Debugger.h. By the time the base destructor runs, mLoopThread is guaranteed to
-            // have already returned from Start(), so Terminate() never races the loop thread's
-            // own use of mProcess.
-            //
-            // Bounded, not a bare join(): a test that already called WaitForLoopToFinish() will
-            // find mLoopFinished already true and this is instant, but a test that did not (or a
-            // genuine regression in Stop()'s own teardown -- exactly what this file exists to
-            // catch) must not turn one failing test into a hung test binary. Detaching an
-            // abandoned thread here leaks it, harmlessly, for the rest of the process's life
-            // rather than block it forever.
-            Stop();
-            if(mLoopThread.joinable())
-            {
-                if(!mLoopFinished.load(std::memory_order_acquire))
-                    WaitForLoopToFinish();
-                if(mLoopFinished.load(std::memory_order_acquire))
-                    mLoopThread.join();
-                else
-                    mLoopThread.detach();
-            }
-        }
-
-        bool StartOnThread()
-        {
-            mLoopThread = std::thread([this] {
-                Start();
-                mLoopFinished.store(true, std::memory_order_release);
-            });
-            return true;
-        }
-
-        bool WaitFor(const EventType type,
-                     const std::chrono::milliseconds timeout = std::chrono::seconds(5))
-        {
-            std::unique_lock<std::mutex> lock(mEventMutex);
-            return mEventCv.wait_for(lock, timeout, [&] {
-                while(!mEvents.empty())
-                {
-                    const EventType next = mEvents.front();
-                    mEvents.pop();
-                    if(next == type)
-                        return true;
-                }
-                return false;
-            });
-        }
-
-        // True once Start() (running on mLoopThread, via StartOnThread()) has actually returned.
-        // Polled rather than a timed std::thread::join() (which does not exist) -- see the
-        // destructor for why a caller that does not want to risk hanging the whole test binary on
-        // a regression needs this to be bounded rather than a bare join().
-        bool WaitForLoopToFinish(const std::chrono::milliseconds timeout = std::chrono::seconds(5))
-        {
-            const auto deadline = std::chrono::steady_clock::now() + timeout;
-            while(!mLoopFinished.load(std::memory_order_acquire) &&
-                  std::chrono::steady_clock::now() < deadline)
-            {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-            return mLoopFinished.load(std::memory_order_acquire);
-        }
-
-        int LastExitCode() const { return mExitCode; }
-
-    protected:
-        void cbSystemBreakpoint() override { pushEvent(EventType::SystemBreakpoint); }
-
-        void cbExitProcessEvent(int exitCode) override
-        {
-            mExitCode = exitCode;
-            pushEvent(EventType::ExitProcess);
-        }
-
-    private:
-        void pushEvent(const EventType type)
-        {
-            std::lock_guard<std::mutex> lock(mEventMutex);
-            mEvents.push(type);
-            mEventCv.notify_all();
-        }
-
-        std::thread mLoopThread;
-        std::atomic<bool> mLoopFinished{false};
-        std::mutex mEventMutex;
-        std::condition_variable mEventCv;
-        std::queue<EventType> mEvents;
-        int mExitCode = -1;
-    };
 }
 
-// This is the test the task brief asks for verbatim (Step 2), adapted to LocalRecordingDebugger
-// -- see its comment for why.
+// This is the test the task brief asks for verbatim (Step 2), adapted to RecordingDebugger
+// (TestHarness.h) -- see its comment for why.
 TEST_CASE("the first exception stops the target until it is resumed")
 {
-    LocalRecordingDebugger debugger;
+    RecordingDebugger debugger;
     REQUIRE(debugger.Init(FIXTURE("hello_machbug").c_str()));
-    REQUIRE(debugger.StartOnThread());
+    debugger.StartOnThread();
 
     REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
     REQUIRE(debugger.IsStopped());
@@ -176,9 +66,14 @@ TEST_CASE("the target does not run while stopped at the first exception, and doe
     std::fflush(stdout);
     const int redirectRc = dup2(outFd, STDOUT_FILENO);
 
-    LocalRecordingDebugger debugger;
+    RecordingDebugger debugger;
     const bool launched = redirectRc != -1 && debugger.Init(FIXTURE("hello_machbug").c_str());
-    const bool started = launched && debugger.StartOnThread();
+    if(launched)
+        debugger.StartOnThread();
+    // StartOnThread() itself cannot fail (it only spawns a thread), so "started" tracks nothing
+    // more than "did we get far enough to call it" -- kept as its own bool anyway to leave the
+    // rest of this test's REQUIRE(started) diagnostic unchanged.
+    const bool started = launched;
     const bool stoppedAtFirstException = started && debugger.WaitFor(EventType::SystemBreakpoint);
 
     const long sizeAtStop = stoppedAtFirstException ? fileSize(outPath) : -1;
@@ -380,13 +275,13 @@ TEST_CASE("a signal-passthrough exception for a signal other than SIGCONT is not
 // test starts run_endlessly (which never exits on its own), answers its first stop so it is truly
 // running freely (not merely resumed-but-still-inside-the-reply-plumbing) when Stop() is called,
 // and confirms both that the loop thread actually returns (bounded -- see
-// LocalRecordingDebugger::WaitForLoopToFinish()'s comment) and that the process is actually dead,
+// RecordingDebugger::WaitForLoopToFinish()'s comment) and that the process is actually dead,
 // checked independently of this class's own bookkeeping via kill(pid, 0).
 TEST_CASE("Stop() kills a genuinely running target instead of hanging on its own SIGKILL")
 {
-    LocalRecordingDebugger debugger;
+    RecordingDebugger debugger;
     REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
-    REQUIRE(debugger.StartOnThread());
+    debugger.StartOnThread();
     REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
 
     const pid_t pid = debugger.GetPid();

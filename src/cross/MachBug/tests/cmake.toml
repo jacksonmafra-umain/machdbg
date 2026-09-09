@@ -87,7 +87,8 @@ properties.OUTPUT_NAME = "no_get_task_allow"
 
 [target.MachBug_tests]
 type = "executable"
-sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp", "mig_exception_server.cpp", "debugger_launch.cpp", "exception_loop.cpp"]
+sources = ["api_contract.cpp", "api_contract_c.c", "targets_signed.cpp", "mig_exception_server.cpp", "debugger_launch.cpp", "exception_loop.cpp", "test_harness.cpp"]
+headers = ["TestHarness.h"]
 compile-features = ["cxx_std_17"]
 include-directories = ["../"]
 # machbug_mig is defined in MachBug/MachBug/cmake.toml now (Task 4 -- MachBug itself needs
