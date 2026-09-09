@@ -45,6 +45,15 @@ about these frameworks. The floor deliberately tracks `qtbase` at 14.0 because r
 would set the bundles' minimum OS to 26 in a later milestone. Installing the official universal
 Qt, required for `macos-universal` and eventual release, resolves this inconsistency at the source.
 
+`scripts/check-bundles.sh` holds both halves of this to account. It **fails** when a binary this
+project builds disagrees with the preset's floor, or when a bundle's `LSMinimumSystemVersion`
+disagrees with what its own executable needs — a bundle that promises a lower floor than it can
+honour starts on a machine it cannot run on, and the only symptom is a crash on an older macOS.
+It **reports**, without failing, the highest floor among the Qt copies `macdeployqt` brings in:
+those come from Homebrew bottles and are not ours to recompile, so today's bundles declare 14.0
+while shipping libraries that need up to 26.0. That note is expected to go away with the official
+Qt, not to be silenced.
+
 ### cmkr
 
 `cmkr` is not a Homebrew formula. Download the `cmkr-macos.zip` asset from the
