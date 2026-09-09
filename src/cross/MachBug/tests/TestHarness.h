@@ -167,7 +167,13 @@ namespace MachBug::test
         // There is no timed std::thread::join(), so this is what a caller (including this
         // class's own destructor) uses instead of risking a bare join() hanging forever on a
         // regression -- see the destructor's comment.
-        bool WaitForLoopToFinish(std::chrono::milliseconds timeout = std::chrono::seconds(5))
+        // Fifteen seconds, not five, and the number is not arbitrary: Process::WaitForRealExit
+        // polls for up to ten (500 attempts, 20ms apart) before giving up on a target that will
+        // not die. A guard tighter than the thing it guards fires on a teardown that was working
+        // -- which is what it did, aborting a passing test on the Intel runner and once in a
+        // dozen local runs, with a message blaming a Stop() that had not regressed at all. This
+        // bound must stay strictly greater than the engine's own.
+        bool WaitForLoopToFinish(std::chrono::milliseconds timeout = std::chrono::seconds(15))
         {
             std::unique_lock lock(mMutex);
             return mCv.wait_for(lock, timeout, [this] { return mLoopFinished; });

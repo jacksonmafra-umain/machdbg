@@ -336,6 +336,10 @@ namespace MachBug
         // which thread that leaves the callbacks on.
         void refreshThreads();
 
+        // Tells the kernel not to deliver the signal that accompanies a trap this engine caused.
+        // See the implementation for the two failures that made it necessary.
+        void suppressPendingSignal(mach_port_t thread, const char* what);
+
         // Loop-thread only. The breakpoint the target is currently stopped on, or 0: resuming
         // from it needs the trap taken out first, and this is what remembers which one to put
         // back afterwards.

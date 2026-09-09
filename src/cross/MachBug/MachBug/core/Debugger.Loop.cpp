@@ -468,27 +468,7 @@ namespace MachBug
         {
             mSteppingOverBreakpoint = false;
 
-            // MEASURED: the step that gets a target off a breakpoint completes as a SIGTRAP
-            // passthrough, and answering that exception with KERN_SUCCESS is not enough to stop
-            // the kernel from then delivering the signal -- whose default action kills the
-            // target. The first version of this cycle did exactly that, and the fixture died with
-            // ExitProcess(code=-5).
-            //
-            // PT_THUPDATE is the request that decides a passed-through signal's fate: its third
-            // argument is the thread port and its fourth is the signal to deliver, so zero means
-            // deliver nothing. The trap belongs to this engine's own machinery -- the target
-            // never asked for it and must not see it.
-            if(mProcess)
-            {
-                errno = 0;
-                if(ptrace(PT_THUPDATE, mProcess->pid,
-                          reinterpret_cast<caddr_t>(static_cast<uintptr_t>(thread)), 0) == -1 &&
-                   errno != 0)
-                {
-                    cbInternalError(std::string("could not suppress the step's SIGTRAP: ") +
-                                     std::strerror(errno));
-                }
-            }
+            suppressPendingSignal(thread, "the step");
 
             std::string rearmError;
             if(mStoppedAtBreakpoint != 0 && mProcess &&
@@ -775,6 +755,32 @@ namespace MachBug
     bool Debugger::IsRunning() const
     {
         return mIsRunning.load(std::memory_order_acquire);
+    }
+
+    void Debugger::suppressPendingSignal(const mach_port_t thread, const char* what)
+    {
+        if(!mProcess)
+            return;
+
+        // MEASURED. A step that this engine armed reaches the target as a passed-through SIGTRAP
+        // as well as an exception, and answering the exception with KERN_SUCCESS does not stop
+        // the delivery: the fixture died with ExitProcess(code=-5) until this call existed.
+        //
+        // Only for that case. Calling it for a raw breakpoint trap was tried and the kernel
+        // refused with EBUSY ("Resource busy"): PT_THUPDATE decides the fate of a signal that is
+        // pending for the thread, and an EXC_BREAKPOINT this engine answers has none.
+        //
+        // PT_THUPDATE decides a passed-through signal's fate: its third argument is the thread
+        // port and its fourth is the signal to deliver, so zero means deliver nothing. Every trap
+        // this engine set is its own machinery; the target never asked for it and must not see it.
+        errno = 0;
+        if(ptrace(PT_THUPDATE, mProcess->pid,
+                  reinterpret_cast<caddr_t>(static_cast<uintptr_t>(thread)), 0) == -1 &&
+           errno != 0)
+        {
+            cbInternalError(std::string("could not suppress the signal for ") + what + ": " +
+                             std::strerror(errno));
+        }
     }
 
     Breakpoints& Debugger::BreakpointTable()
