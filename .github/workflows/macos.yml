@@ -15,7 +15,11 @@ jobs:
       - name: Install the toolchain
         run: |
           brew install ninja qt capstone
-          curl -sSfL -o cmkr.zip \
+          # --retry, because this download is a single point of failure with no fallback:
+          # it answered HTTP 500 once (run 34347238871) and failed a job whose own work was
+          # already done. Retrying an asset fetch is safe -- it is a plain GET of an immutable
+          # release asset.
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 2 -o cmkr.zip \
             "$(gh release view --repo build-cpp/cmkr --json assets \
                --jq '.assets[] | select(.name | test("macos")) | .url')"
           unzip -o cmkr.zip -d /usr/local/bin
@@ -103,7 +107,11 @@ jobs:
       - name: Install the toolchain
         run: |
           brew install ninja qt capstone
-          curl -sSfL -o cmkr.zip \
+          # --retry, because this download is a single point of failure with no fallback:
+          # it answered HTTP 500 once (run 34347238871) and failed a job whose own work was
+          # already done. Retrying an asset fetch is safe -- it is a plain GET of an immutable
+          # release asset.
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 2 -o cmkr.zip \
             "$(gh release view --repo build-cpp/cmkr --json assets \
                --jq '.assets[] | select(.name | test("macos")) | .url')"
           unzip -o cmkr.zip -d /usr/local/bin
