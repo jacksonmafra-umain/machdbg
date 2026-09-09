@@ -552,7 +552,7 @@ out of scope. The image's continued availability still needs a fresh check befor
 | 0 | Upstream alignment: read `src/cross`, vendor-and-strip, agree the API shape, licences and credits | This document, an agreed API header, `CREDITS.md`, `docs/licenses.md` |
 | 1 | Widgets build and run on macOS under Qt 6; `hex_viewer` and `minidump` launch as `.app` | Screenshots, CI job |
 | 2 | MachBug skeleton: launch, attach, exception loop, stop/resume, signing working | Engine test harness |
-| 3 | Registers and memory read/write, both architectures | Register view populated on a real process |
+| 3 | Registers and memory read/write, both architectures | Register view populated on a real process — `regview.app`, checked by `regview --selftest` offscreen and by the engine suite on both architectures |
 | 4 | Software and hardware breakpoints, single-step, both architectures | Test targets |
 | 5 | Mach-O module enumeration via dyld, memory map, thread list | Views populated |
 | 6 | Capstone behind the disassembly interface, both architectures | Disassembly view on native code |
@@ -571,7 +571,7 @@ out of scope. The image's continued availability still needs a fresh check befor
 - The debuggability report answers correctly in all four cases of §9.
 - The read-only fixup inspector displays stub resolution for a loaded module.
 - A Tier 1 plugin compiled from unmodified source loads and runs.
-- x86-64 behaviour is either proven on an Intel CI runner or labelled `unverified`.
+- x86-64 behaviour is either proven on an Intel CI runner or labelled `unverified`. **Proven for the engine as of milestone 3**: the `macos-15-intel` job builds and runs the whole engine suite as the ordinary user, and reported `All tests passed (468 assertions in 48 test cases)` on x86_64, macOS 15.7.9 (2026-09-09). That covers registers, memory, the exception loop and the attach path; the Qt front end is still built and smoke-launched only on Apple Silicon.
 - Credits and licences complete.
 
 ## 13. Open research questions
@@ -581,9 +581,11 @@ Each of these gets its own issue. None blocks work before the milestone named.
 1. **AArch64 assembler** (milestone 6): does asmtk parse AArch64? If not, LLVM MC as an
    assembler only, or the Clang integrated assembler. Keystone is excluded on licence grounds.
 2. **DWARF parser** (milestone 7): libdwarf pending a licence check, or an alternative.
-3. **Intel CI image** — answered 2026-09-08 in milestone 1's CI workflow: the image is
-   available as `macos-15-intel` (the `macos-13` label named when this question was written no
-   longer exists). The job in `.github/workflows/macos.yml` ran `uname -m` and `sw_vers` on it
+3. **Intel CI image** — answered 2026-09-08 in milestone 1's CI workflow, and put to work in
+   milestone 3: the image is available as `macos-15-intel` (the `macos-13` label named when this
+   question was written no longer exists), and as of milestone 3 task 8 that job builds and runs
+   the engine tests there rather than only reporting `uname`. Its `continue-on-error` is gone with
+   that change: a job carrying the only proof of the x86-64 half has to be able to fail. The job in `.github/workflows/macos.yml` ran `uname -m` and `sw_vers` on it
    and got `x86_64` and macOS 15.7.9 (build 24G830) back, confirming a working Intel runner
    without requiring the project owner to buy Intel hardware. `unverified` remains the fallback
    label if a future milestone finds the image gone, but that has not happened.
