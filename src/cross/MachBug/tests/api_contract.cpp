@@ -191,22 +191,80 @@ TEST_CASE("unimplemented vtable entries are discoverable stubs, not null functio
     MachBugDestroy(engine);
 }
 
-// The task brief's Step 2 test, verbatim: launch exit_code_42 through the real engine and check
-// the pid. exit_code_42 does nothing after being resumed (main() { return 42; }), so Start()
-// -- blocking for the target's whole life, per machbug_api.h -- returns quickly, on this same
-// thread, once the target has run to completion.
+namespace
+{
+    // The vtable does not resume a target's first stop automatically (machbug_api.cpp's header
+    // comment) -- a stop is a withheld reply, and the caller decides when it ends, the same way
+    // ElfBug's own callers call Continue() themselves after onSystemBreakpoint. This is that
+    // decision made explicit for a test that wants "just run it to completion", not
+    // interactive control: call Continue() from inside the callback, exactly as a real caller
+    // reaching for the same behavior would.
+    struct ResumeOnSystemBreakpoint
+    {
+        DbgEngine* engine = nullptr;
+    };
+
+    void continueOnSystemBreakpoint(void* userdata)
+    {
+        auto* ctx = static_cast<ResumeOnSystemBreakpoint*>(userdata);
+        if(ctx->engine)
+            ctx->engine->Continue(ctx->engine->impl);
+    }
+}
+
+// Adapted from the task brief's Step 2 test: launch exit_code_42 through the real engine and
+// check the pid. exit_code_42 does nothing after being resumed (main() { return 42; }), so
+// Start() -- blocking for the target's whole life, per machbug_api.h -- returns quickly, on this
+// same thread, once the target has run to completion. Unlike the brief's literal snippet, this
+// registers onSystemBreakpoint to call Continue() itself: the vtable leaves the target's first
+// stop parked rather than resuming it for the caller (see machbug_api.cpp's header comment), so
+// running to completion is this test's own explicit choice, not the engine's default.
 TEST_CASE("the engine launches and runs a target through the C contract")
 {
+    ResumeOnSystemBreakpoint resume;
     DbgEngineCallbacks callbacks{};
-    // Record exit through userdata; keep it minimal, the harness covers the rest.
+    callbacks.onSystemBreakpoint = continueOnSystemBreakpoint;
+    callbacks.userdata = &resume;
+
     DbgEngine* engine = MachBugCreate(&callbacks);
     REQUIRE(engine != nullptr);
+    resume.engine = engine;
 
     DbgLaunchSpec spec{};
     spec.path = MACHBUG_TESTS_TARGETS_DIR "/exit_code_42";
 
     REQUIRE(engine->Start(engine->impl, &spec) == DbgStatus_Ok);
     REQUIRE(engine->GetPid(engine->impl) > 0);
+
+    MachBugDestroy(engine);
+}
+
+// GetPid() alone is stale here on purpose (MachBug::Debugger does not reset mProcess just
+// because its loop ended -- see machbug_api.cpp's classifyCommandTarget() comment), so this
+// pins the gating that keeps that staleness from being mistaken for "the command succeeded":
+// once Start() has returned, GetPid() still reports exit_code_42's now-dead pid, but every
+// command below must report DbgStatus_TargetExited, not a misleading DbgStatus_Ok.
+TEST_CASE("Continue/StepInto/Pause/Stop report TargetExited once the target has already exited")
+{
+    ResumeOnSystemBreakpoint resume;
+    DbgEngineCallbacks callbacks{};
+    callbacks.onSystemBreakpoint = continueOnSystemBreakpoint;
+    callbacks.userdata = &resume;
+
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+    resume.engine = engine;
+
+    DbgLaunchSpec spec{};
+    spec.path = MACHBUG_TESTS_TARGETS_DIR "/exit_code_42";
+
+    REQUIRE(engine->Start(engine->impl, &spec) == DbgStatus_Ok);
+    REQUIRE(engine->GetPid(engine->impl) > 0);
+
+    REQUIRE(engine->Continue(engine->impl) == DbgStatus_TargetExited);
+    REQUIRE(engine->StepInto(engine->impl) == DbgStatus_TargetExited);
+    REQUIRE(engine->Pause(engine->impl) == DbgStatus_TargetExited);
+    REQUIRE(engine->Stop(engine->impl) == DbgStatus_TargetExited);
 
     MachBugDestroy(engine);
 }
@@ -226,9 +284,9 @@ TEST_CASE("Start rejects a launch spec with neither a path nor an attach pid")
 
 namespace
 {
-    // Signals from the C callbacks below, used the same way LocalRecordingDebugger
-    // (exception_loop.cpp) uses its internal event queue -- except here nothing has direct
-    // access to MachBug::Debugger at all, only the DbgEngineCallbacks the vtable actually
+    // Signals from the C callbacks below, used the same way MachBug::test::RecordingDebugger
+    // (tests/TestHarness.h) uses its own recorded event timeline -- except here nothing has
+    // direct access to MachBug::Debugger at all, only the DbgEngineCallbacks the vtable actually
     // invokes, which is the point: this is a test of the C boundary, not of the C++ class
     // underneath it.
     struct AttachHarness
@@ -239,6 +297,11 @@ namespace
         std::atomic<int> startResult{-1};
         std::mutex errorMutex;
         std::string lastError; // diagnostic only -- see onError below
+
+        // The vtable leaves a target's first stop parked rather than resuming it automatically
+        // (machbug_api.cpp's header comment) -- set once MachBugCreate() has returned so
+        // onSystemBreakpoint below can call Continue() itself, the same way a real caller would.
+        DbgEngine* engine = nullptr;
     };
 
     void onCreateProcess(pid_t pid, uint64_t /*entryPoint*/, void* userdata)
@@ -246,6 +309,17 @@ namespace
         auto* h = static_cast<AttachHarness*>(userdata);
         h->createdPid.store(pid, std::memory_order_release);
         h->created.store(true, std::memory_order_release);
+    }
+
+    // This test wants "attach, then run freely" -- not interactive control -- so it resumes the
+    // one stop every attach produces itself, exactly as a real caller reaching for the same
+    // behavior would (see machbug_api.cpp's header comment: the vtable does not decide this on
+    // the caller's behalf).
+    void onSystemBreakpoint(void* userdata)
+    {
+        auto* h = static_cast<AttachHarness*>(userdata);
+        if(h->engine)
+            h->engine->Continue(h->engine->impl);
     }
 
     // Wired for diagnostics only: if Attach() fails, the assertions below would otherwise report
@@ -283,18 +357,21 @@ TEST_CASE("attach takes control of a process machdbg did not launch, and Stop te
     AttachHarness harness;
     DbgEngineCallbacks callbacks{};
     callbacks.onCreateProcess = onCreateProcess;
+    callbacks.onSystemBreakpoint = onSystemBreakpoint;
     callbacks.onError = onError;
     callbacks.userdata = &harness;
 
     DbgEngine* engine = MachBugCreate(&callbacks);
     REQUIRE(engine != nullptr);
+    harness.engine = engine;
 
     DbgLaunchSpec spec{};
     spec.attachPid = targetPid;
 
     // Start() blocks for the life of the target (machbug_api.h), and run_endlessly never exits
     // on its own -- exactly why this needs its own thread, the same shape
-    // LocalRecordingDebugger::StartOnThread() gives the launch-path tests in exception_loop.cpp.
+    // MachBug::test::RecordingDebugger::StartOnThread() gives the launch-path tests in
+    // exception_loop.cpp.
     //
     // Every REQUIRE that can fail is deliberately deferred until after this thread is joined or
     // detached, below -- a REQUIRE failing here would throw and unwind the stack through
@@ -320,10 +397,11 @@ TEST_CASE("attach takes control of a process machdbg did not launch, and Stop te
 
     if(created)
     {
-        // A moment for the SIGCONT-turned-exception's reply to actually go out and
-        // run_endlessly to resume running freely -- same margin exception_loop.cpp's own
-        // Stop()-while-running test gives a launched target, so Stop() below exercises a live
-        // target, not one still mid-resume.
+        // A moment for the SIGCONT-turned-exception to actually arrive, for onSystemBreakpoint
+        // (above) to call Continue() in response, and for run_endlessly to resume running freely
+        // -- same margin exception_loop.cpp's own Stop()-while-running test gives a launched
+        // target, so Stop() below exercises a live target, not one still parked at its first
+        // stop or mid-resume.
         std::this_thread::sleep_for(std::chrono::milliseconds(300));
     }
     // Stop() is harmless (and idempotent) to call here regardless of `created`: if attach never

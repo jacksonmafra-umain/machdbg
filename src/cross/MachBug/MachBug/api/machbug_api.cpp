@@ -22,15 +22,17 @@
 // callers written against "check the DbgStatus" from day one need no adjustment when a stub
 // becomes real.
 //
-// SECOND DECISION, forced by the first exception every launch or attach ever produces (see
-// MachBugEngine::cbSystemBreakpoint() below): MachBug::Debugger parks a target at that one, the
-// same as any other, and expects a caller to call Continue() -- exactly what the callers in
-// exception_loop.cpp and debugger_launch.cpp do by hand. DbgCbSystemBreakpoint has no return
-// value such a caller could use to say "leave it stopped", and this milestone gives a caller no
-// breakpoints or interactive stepping to want that for regardless -- those are milestone 3/4's
-// job. So this layer resumes past it automatically, every time, the same way gdb/lldb do not stop
-// a target at dyld's own post-exec notification unless asked to. A caller's onSystemBreakpoint is
-// still invoked first, for observability, but its return has no way to change this engine's mind.
+// SECOND DECISION: the first exception every launch or attach ever produces -- dyld's own
+// post-exec notification on the launch path, the SIGCONT-turned-exception PT_ATTACHEXC's own
+// attach produces on the attach path (see Debugger::Attach()'s comment) -- is left stopped, not
+// auto-resumed. MachBug::Debugger parks a target there exactly like any other exception, and
+// this layer does not decide on the caller's behalf that the answer is always "run": a stop is a
+// withheld reply, and the caller is what decides when it ends, the same way ElfBug's own
+// cbSystemBreakpoint() (elfbug_api.cpp) leaves the target stopped and lets its caller call
+// Continue(). An engine that resumed here automatically would give an adapter a different first
+// stop depending on which backend happened to be behind the vtable, which is precisely the
+// divergence machbug_api.h's vtable exists to prevent. See MachBugEngine::cbSystemBreakpoint()
+// below.
 #include <MachBug/api/machbug_api.h>
 #include <MachBug/core/Debugger.h>
 
@@ -77,22 +79,19 @@ namespace
 
         void cbSystemBreakpoint() override
         {
+            // No auto-resume: matches elfbug_api.cpp's own cbSystemBreakpoint(), which fires the
+            // callback and leaves the target stopped rather than deciding for the caller. A stop
+            // is a withheld reply, and the caller decides when it ends -- that default is what
+            // the whole vtable rests on, launch or attach, this milestone or a later one with
+            // real breakpoints. A caller that wants to run past this stop calls Continue()
+            // itself (on the vtable, from inside this very callback or later, on another
+            // thread) -- exactly as ElfBug's own callers already do, and exactly what a real
+            // caller above this engine does regardless of which backend filled the vtable. An
+            // engine that decided this instead would give an adapter a different first stop
+            // depending on which backend it happened to be talking to, which is precisely the
+            // divergence the vtable exists to prevent.
             if(cb.onSystemBreakpoint)
                 cb.onSystemBreakpoint(cb.userdata);
-
-            // Every launch and every attach produces exactly one of these (dyld's own post-exec
-            // notification on the launch path; the SIGCONT PT_ATTACHEXC's own attach turns into
-            // an exception on the attach path -- see Debugger::Attach()'s comment) before the
-            // target has run one instruction of its own code. It is not a breakpoint the caller
-            // set, and DbgCbSystemBreakpoint has no return value a caller could use to ask to
-            // stay stopped here even if one existed -- milestone 3/4 is what gives a caller real
-            // breakpoints and an interactive Pause()/Continue() to use them with. Until then, the
-            // only sensible default is to resume automatically, the same way gdb/lldb do not stop
-            // a launched or attached target at this same notification unless asked to. Safe to
-            // call Continue() from here: this override runs on the loop thread, synchronously
-            // inside handleException(), before that function ever reaches its own wait -- this
-            // posts the decision that wait immediately finds already made, rather than racing it.
-            Continue();
         }
 
         void cbStep() override
@@ -169,11 +168,31 @@ namespace
         return engine->Start() ? DbgStatus_Ok : DbgStatus_Failed;
     }
 
+    // GetPid() alone is not enough to gate Continue/StepInto/Pause/Stop below: MachBug::Debugger
+    // does not reset mProcess when its loop ends on its own (a clean exit, a crash, or a prior
+    // Stop()) -- GetPid() keeps reporting the now-dead target's pid until Terminate()/the
+    // destructor runs, exactly so a caller can still ask "what was I just debugging" after the
+    // fact (LastExitCode()-style bookkeeping upstream relies on the same thing). IsRunning() is
+    // what actually answers "is Start()'s loop still going" -- true from the start of Start()
+    // until exceptionLoop() returns, unaffected by whether mProcess is still around. A command
+    // reaching a pid whose loop has already ended gets the enum machbug_api.h reserves for
+    // exactly this (DbgStatus_TargetExited), not a misleading DbgStatus_Ok that implies the
+    // command did something.
+    DbgStatus classifyCommandTarget(const MachBugEngine* engine)
+    {
+        if(!engine || engine->GetPid() <= 0)
+            return DbgStatus_NotAttached;
+        if(!engine->IsRunning())
+            return DbgStatus_TargetExited;
+        return DbgStatus_Ok;
+    }
+
     DbgStatus vtContinue(void* impl)
     {
         MachBugEngine* engine = toEngine(impl);
-        if(!engine || engine->GetPid() <= 0)
-            return DbgStatus_NotAttached;
+        const DbgStatus status = classifyCommandTarget(engine);
+        if(status != DbgStatus_Ok)
+            return status;
         engine->Continue();
         return DbgStatus_Ok;
     }
@@ -181,8 +200,9 @@ namespace
     DbgStatus vtStepInto(void* impl)
     {
         MachBugEngine* engine = toEngine(impl);
-        if(!engine || engine->GetPid() <= 0)
-            return DbgStatus_NotAttached;
+        const DbgStatus status = classifyCommandTarget(engine);
+        if(status != DbgStatus_Ok)
+            return status;
         engine->StepInto();
         return DbgStatus_Ok;
     }
@@ -190,8 +210,9 @@ namespace
     DbgStatus vtPause(void* impl)
     {
         MachBugEngine* engine = toEngine(impl);
-        if(!engine || engine->GetPid() <= 0)
-            return DbgStatus_NotAttached;
+        const DbgStatus status = classifyCommandTarget(engine);
+        if(status != DbgStatus_Ok)
+            return status;
         engine->Pause();
         return DbgStatus_Ok;
     }
@@ -199,8 +220,9 @@ namespace
     DbgStatus vtStop(void* impl)
     {
         MachBugEngine* engine = toEngine(impl);
-        if(!engine || engine->GetPid() <= 0)
-            return DbgStatus_NotAttached;
+        const DbgStatus status = classifyCommandTarget(engine);
+        if(status != DbgStatus_Ok)
+            return status;
         engine->Stop();
         return DbgStatus_Ok;
     }
