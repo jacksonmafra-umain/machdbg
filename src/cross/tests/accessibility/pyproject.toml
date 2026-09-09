@@ -8,10 +8,11 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["minidump_accessibility"]
+py-modules = ["minidump_accessibility", "regview_accessibility"]
 
 [project.scripts]
 x64dbg-minidump-accessibility = "minidump_accessibility:main"
+x64dbg-regview-accessibility = "regview_accessibility:main"
 
 [tool.uv]
 package = true

@@ -105,6 +105,46 @@ cmake --build build/macos-arm64 --target MachBug_tests
 ./build/macos-arm64/tests/MachBug_tests
 ```
 
+## Seeing a target's registers and memory
+
+`regview` is milestone 3's proof: it launches or attaches to a target, stops it, and shows its
+registers and the memory around its program counter. It is a sample app in the shape of milestone
+1's four, not the debugger -- the debugger's own window needs disassembly, breakpoints and modules
+from later milestones, so it stays Linux-only until those exist.
+
+```bash
+cd src/cross
+cmake --preset macos-arm64 -DMACHBUG_BUILD_TESTS=ON
+cmake --build build/macos-arm64 --target regview MachBug_tests
+./build/macos-arm64/regview.app/Contents/MacOS/regview \
+    build/macos-arm64/tests/targets/run_endlessly
+```
+
+Any target works, not only the test fixtures, as long as it is signed with
+`com.apple.security.get-task-allow` (see the note above on why).
+
+### Checking it without looking at it
+
+`--selftest` runs the whole app against a real target, reports what the register table and the
+memory panel are actually showing, and exits non-zero if either came back empty. It needs no
+window server, which is what makes it the check CI can run:
+
+```bash
+QT_QPA_PLATFORM=offscreen ./build/macos-arm64/regview.app/Contents/MacOS/regview \
+    --selftest build/macos-arm64/tests/targets/run_endlessly
+```
+
+A passing run prints every register row, the memory panel's base and size, and
+`RESULT: the register table and the memory panel are populated`. The check is deliberately about
+the *values*: a table of 34 rows of zeroes is what a view that renders but is never fed looks
+like, and a row count alone would accept it.
+
+`src/cross/tests/accessibility/regview_accessibility.py` checks the same thing through the native
+accessibility API, which is what a screen reader sees. It currently **fails** -- not because the
+view is empty, but because a table repopulated after its accessible interface exists reads as
+having no rows (issue #88). The script is the reproduction for that bug; `--selftest` is what
+proves the view meanwhile.
+
 ## Signing
 
 macOS refuses to let an unsigned binary debug anything: `task_for_pid` requires the

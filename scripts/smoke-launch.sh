@@ -15,7 +15,7 @@ if [[ "${MACHDBG_SMOKE_OFFSCREEN:-0}" == "1" ]]; then
     export QT_QPA_PLATFORM=offscreen
 fi
 
-for app in hex_viewer minidump remote_table release_notes; do
+for app in hex_viewer minidump remote_table release_notes regview; do
     binary="$build_dir/$app.app/Contents/MacOS/$app"
     if [[ ! -x "$binary" ]]; then
         fail "$app has no executable to launch"
@@ -35,6 +35,16 @@ for app in hex_viewer minidump remote_table release_notes; do
     # what a Homebrew bash on PATH makes `#!/usr/bin/env bash` pick up locally. "$@" has
     # no such problem even with zero positional parameters, on any bash version.
     set --
+    if [[ "$app" == "regview" ]]; then
+        # regview launches or attaches to a target; without one it shows an empty window, which
+        # proves less than the same launch with a fixture it can actually stop. The fixture is
+        # only there when the engine tests were built, so its absence is a skip rather than a
+        # failure -- this script's job is that the bundles start, not that the test targets exist.
+        fixture="$build_dir/tests/targets/run_endlessly"
+        if [[ -x "$fixture" ]]; then
+            set -- "$fixture"
+        fi
+    fi
     if [[ "$app" == "release_notes" ]]; then
         md_file="README.md"
         if [[ ! -f "$md_file" ]]; then

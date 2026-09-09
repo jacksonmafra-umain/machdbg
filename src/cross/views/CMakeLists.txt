@@ -46,6 +46,8 @@ target_include_directories(machdbg_register_format PUBLIC
 
 # Target: machdbg_views
 set(machdbg_views_SOURCES
+	EngineMemoryPage.cpp
+	EngineMemoryPage.h
 	RegisterTable.cpp
 	RegisterTable.h
 	cmake.toml

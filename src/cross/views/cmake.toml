@@ -24,8 +24,8 @@ include-directories = ["../", "../MachBug"]
 
 [target.machdbg_views]
 type = "static"
-sources = ["RegisterTable.cpp"]
-headers = ["RegisterTable.h"]
+sources = ["RegisterTable.cpp", "EngineMemoryPage.cpp"]
+headers = ["RegisterTable.h", "EngineMemoryPage.h"]
 compile-features = ["cxx_std_17"]
 include-directories = ["../", "../MachBug"]
 link-libraries = ["x64dbg::widgets", "machdbg_register_format"]

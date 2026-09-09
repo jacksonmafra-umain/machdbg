@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <QString>
+#include <QStringList>
 
 #include <MachBug/api/machbug_api.h>
 
@@ -42,6 +43,12 @@ public:
     // True if the row's value differed from the previous snapshot -- exposed for the accessibility
     // check in the sample app, which has no way to see a colour.
     bool rowChanged(uint32_t row) const;
+
+    // What the table is showing, one "<name> <value>[ changed]" entry per row. This is what makes
+    // the view checkable without a window server: an offscreen run can assert the rows are
+    // *populated*, not merely present, which is the failure a screenshot review would catch by
+    // eye and a headless CI job otherwise could not catch at all.
+    QStringList rows() const;
 
 signals:
     void registerEdited(const QString& name, uint64_t value);

@@ -43,7 +43,7 @@ minos_of() { vtool -show-build "$1" 2>/dev/null | awk '/minos/ { print $2; exit 
 # Collects one line per app executable, for the cross-bundle comparison after the loop.
 built_minos=""
 
-for app in hex_viewer minidump remote_table release_notes; do
+for app in hex_viewer minidump remote_table release_notes regview; do
     bundle="$build_dir/$app.app"
     if [[ ! -d "$bundle" ]]; then
         fail "$app.app was not produced"

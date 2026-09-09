@@ -99,6 +99,27 @@ link-libraries = [
     "fmt::fmt-header-only",
 ]
 
+# Milestone 3's proof: a real process's registers and memory on screen. macOS-only, like the
+# engine it drives -- and a sample app rather than the debugger, whose own window needs
+# disassembly, breakpoints and modules from milestones 4 to 6.
+[target.regview]
+type = "qt_executable"
+condition = "macos"
+sources = [
+    "regview/*.cpp",
+    "regview/*.h",
+]
+include-directories = [
+    "regview",
+    "views",
+]
+link-libraries = [
+    "x64dbg::widgets",
+    "::machdbg_views",
+    "::MachBug",
+    "::machbug_mig",
+]
+
 [target.ElfBug]
 type = "static"
 condition = "linux-x64"

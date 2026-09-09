@@ -286,6 +286,52 @@ if(NOT CMKR_VS_STARTUP_PROJECT)
 	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT hex_viewer)
 endif()
 
+# Target: regview
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin") # macos
+	set(regview_SOURCES
+		cmake.toml
+		"regview/MainWindow.cpp"
+		"regview/MainWindow.h"
+		"regview/main.cpp"
+	)
+
+	qt_executable(regview ${regview_SOURCES})
+	source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${regview_SOURCES})
+
+	target_compile_features(regview PRIVATE
+		cxx_std_20
+	)
+
+	target_include_directories(regview PRIVATE
+		regview
+		views
+	)
+
+	if(NOT TARGET machdbg_views)
+		message(FATAL_ERROR "Target \"machdbg_views\" referenced by \"regview\" does not exist!")
+	endif()
+
+	if(NOT TARGET MachBug)
+		message(FATAL_ERROR "Target \"MachBug\" referenced by \"regview\" does not exist!")
+	endif()
+
+	if(NOT TARGET machbug_mig)
+		message(FATAL_ERROR "Target \"machbug_mig\" referenced by \"regview\" does not exist!")
+	endif()
+
+	target_link_libraries(regview PRIVATE
+		x64dbg::widgets
+		machdbg_views
+		MachBug
+		machbug_mig
+	)
+
+	get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} DEFINITION VS_STARTUP_PROJECT)
+	if(NOT CMKR_VS_STARTUP_PROJECT)
+		set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT regview)
+	endif()
+
+endif()
 # Target: ElfBug
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$") # linux-x64
 	set(ElfBug_SOURCES
