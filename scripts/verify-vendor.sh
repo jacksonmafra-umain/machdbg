@@ -59,6 +59,9 @@ required=(
     src/cross/MachBug/tests/TestHarness.h
     src/cross/MachBug/tests/test_harness.cpp
     src/cross/MachBug/tests/thread_resolution.cpp
+    src/cross/MachBug/tests/registers_arm64.cpp
+    src/cross/MachBug/MachBug/arch/Arm64.h
+    src/cross/MachBug/MachBug/arch/Arm64.cpp
     src/cross/MachBug/MachBug/cmake.toml
     src/cross/MachBug/MachBug/CMakeLists.txt
     src/cross/MachBug/MachBug/types/MachBug.h
