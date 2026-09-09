@@ -490,6 +490,10 @@ namespace MachBug
 
         {
             std::lock_guard<std::mutex> lock(mCmdMutex);
+            // Recorded before mStopped, not after: IsStopped() going true is what tells another
+            // thread there are registers to read, so the thread they belong to has to be
+            // readable by the time that is observable.
+            mStoppedThread.store(thread, std::memory_order_release);
             mStopped.store(true, std::memory_order_release);
             mPendingCommand = Command::None;
         }
@@ -520,6 +524,9 @@ namespace MachBug
             decision = mPendingCommand != Command::None ? mPendingCommand : Command::Stop;
             mPendingCommand = Command::None;
             mStopped.store(false, std::memory_order_release);
+            // Cleared with the stop it belonged to: a caller that reads registers from a thread
+            // that is running again gets a torn answer, and no error to tell it so.
+            mStoppedThread.store(MACH_PORT_NULL, std::memory_order_release);
         }
 
         if(decision == Command::StepInto)
@@ -626,6 +633,45 @@ namespace MachBug
     bool Debugger::IsRunning() const
     {
         return mIsRunning.load(std::memory_order_acquire);
+    }
+
+    mach_port_t Debugger::StoppedThread() const
+    {
+        return mStoppedThread.load(std::memory_order_acquire);
+    }
+
+    mach_port_t Debugger::ResolveThread(const uint64_t threadId) const
+    {
+        if(threadId == 0)
+            return StoppedThread();
+
+        const auto candidate = static_cast<mach_port_t>(threadId);
+        if(!mProcess || mProcess->task == MACH_PORT_NULL)
+            return MACH_PORT_NULL;
+
+        // Checked against the task's actual thread list rather than trusted: a caller handing
+        // over a stale port from a previous stop, or an outright invented number, would
+        // otherwise reach thread_get_state, which reports KERN_INVALID_ARGUMENT for a port that
+        // is not a thread and MACH_SEND_INVALID_DEST for one that is not even a port. Neither
+        // says "no such thread", which is what actually happened.
+        //
+        // This is not thread enumeration: nothing here lists threads for a caller, and every
+        // port task_threads hands over is released in the same loop.
+        thread_act_array_t threads = nullptr;
+        mach_msg_type_number_t count = 0;
+        if(task_threads(mProcess->task, &threads, &count) != KERN_SUCCESS)
+            return MACH_PORT_NULL;
+
+        mach_port_t found = MACH_PORT_NULL;
+        for(mach_msg_type_number_t i = 0; i < count; ++i)
+        {
+            if(threads[i] == candidate)
+                found = candidate;
+            mach_port_deallocate(mach_task_self(), threads[i]);
+        }
+        vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(threads),
+                      count * sizeof(thread_act_t));
+        return found;
     }
 
     void Debugger::cbCreateProcessEvent(pid_t) {}
