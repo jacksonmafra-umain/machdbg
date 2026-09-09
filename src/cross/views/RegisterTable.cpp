@@ -76,6 +76,24 @@ bool RegisterTable::rowChanged(const uint32_t row) const
     return row < mChanged.size() && mChanged[row];
 }
 
+QStringList RegisterTable::rows() const
+{
+    QStringList out;
+    out.reserve(static_cast<int>(mDescs.size()));
+    for(std::size_t i = 0; i < mDescs.size(); ++i)
+    {
+        // Read back out of the table rather than out of mPrevious: what a caller wants to know is
+        // what the widget is *showing*, which is the thing a stale or half-filled table gets
+        // wrong.
+        QString entry = QString::fromUtf8(mDescs[i].name) + QLatin1Char(' ') +
+                        const_cast<RegisterTable*>(this)->getCellContent(i, kValueColumn);
+        if(i < mChanged.size() && mChanged[i])
+            entry += QStringLiteral(" changed");
+        out.append(entry);
+    }
+    return out;
+}
+
 void RegisterTable::onDoubleClicked()
 {
     const duint row = getInitialSelection();

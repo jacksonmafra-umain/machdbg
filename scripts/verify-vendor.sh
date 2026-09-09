@@ -75,6 +75,12 @@ required=(
     src/cross/views/RegisterFormat.cpp
     src/cross/views/RegisterTable.h
     src/cross/views/RegisterTable.cpp
+    src/cross/views/EngineMemoryPage.h
+    src/cross/views/EngineMemoryPage.cpp
+    src/cross/regview/main.cpp
+    src/cross/regview/MainWindow.h
+    src/cross/regview/MainWindow.cpp
+    src/cross/tests/accessibility/regview_accessibility.py
     src/cross/MachBug/tests/targets/known_globals.cpp
     src/cross/MachBug/MachBug/memory/Memory.h
     src/cross/MachBug/MachBug/memory/Memory.cpp
