@@ -85,10 +85,73 @@ jobs:
   intel:
     name: Intel (answers research question 3)
     runs-on: macos-15-intel
-    continue-on-error: true
+    # continue-on-error is gone as of milestone 3 task 8. It was right while this job only ran
+    # uname and sw_vers to answer whether an Intel runner exists at all: a job that asserts
+    # nothing should not be able to fail the build. It now runs the engine tests, which is the
+    # only proof the x86-64 half of the port works, so it has to be able to fail. If this image
+    # ever disappears, the fallback is the `unverified` label the design document's definition of
+    # done already names -- a decision to take then, not one to pre-forgive here.
     steps:
       - uses: actions/checkout@v4
       - name: Report the runner
         run: |
           uname -m
           sw_vers
+
+      # Qt is needed even though nothing in this job builds a Qt target: src/cross's manifest
+      # adds the widgets subdirectory unconditionally, so configure itself needs it.
+      - name: Install the toolchain
+        run: |
+          brew install ninja qt capstone
+          curl -sSfL -o cmkr.zip \
+            "$(gh release view --repo build-cpp/cmkr --json assets \
+               --jq '.assets[] | select(.name | test("macos")) | .url')"
+          unzip -o cmkr.zip -d /usr/local/bin
+          chmod +x /usr/local/bin/cmkr
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Verify the toolchain
+        run: |
+          echo "QT_ROOT_DIR=$(brew --prefix qt)" >> "$GITHUB_ENV"
+          QT_ROOT_DIR="$(brew --prefix qt)" ./scripts/check-toolchain.sh
+
+      # The macos-x86_64 preset, not macos-arm64: that one pins CMAKE_OSX_ARCHITECTURES to arm64,
+      # so using it here would cross-compile a binary this runner cannot execute -- and the tests
+      # would never run at all, which is exactly the outcome this job exists to prevent.
+      - name: Configure
+        working-directory: src/cross
+        run: cmake --preset macos-x86_64 -DMACHBUG_BUILD_TESTS=ON
+
+      # As the ordinary runner user, no sudo, for the reason the Apple Silicon job states above:
+      # the fixtures are signed with get-task-allow at build time, and that is what task_for_pid
+      # needs. Elevating here would hide a regression in the fixtures' signing.
+      - name: Build the engine tests
+        working-directory: src/cross
+        run: cmake --build build/macos-x86_64 --target MachBug_tests
+
+      # This is where the x86-64 register file stops being compiled-but-unproven: milestone 3's
+      # arch/X86_64.cpp has assertions that compile out on Apple Silicon, and this is the only
+      # place they run. Bounded for the same reason the Apple Silicon job is.
+      - name: Run the engine tests
+        working-directory: src/cross
+        timeout-minutes: 5
+        run: ./build/macos-x86_64/tests/MachBug_tests
+
+      # Only on failure, and only diagnostics: a red run on a machine nobody owns is otherwise a
+      # bare assertion failure with no way to tell an environment result from a code defect.
+      # Fixture entitlements answer "is this a signing problem", and the exception/crash log
+      # answers "did the kernel refuse to deliver what the engine waited for".
+      - name: Diagnose a failure
+        if: failure()
+        working-directory: src/cross
+        run: |
+          echo "== fixture entitlements =="
+          for fixture in build/macos-x86_64/tests/targets/*; do
+            [ -x "$fixture" ] || continue
+            echo "--- $fixture"
+            codesign --display --entitlements - "$fixture" 2>&1 | tail -5
+          done
+          echo "== recent exception and crash activity =="
+          log show --last 10m --predicate 'eventMessage CONTAINS "EXC_" OR process == "ReportCrash"' \
+            --style compact 2>&1 | tail -40 || true
