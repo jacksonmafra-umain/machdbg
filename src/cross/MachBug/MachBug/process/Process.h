@@ -51,16 +51,27 @@ namespace MachBug
         // for a normal exit, -WTERMSIG() for one killed by a signal. Mirrors ElfBug's convention.
         static int ExitCodeFromStatus(int status);
 
-        // Blocks in waitpid(pid, ..., 0) until the process actually terminates (IsRealExit()
-        // true), discarding any WIFSTOPPED notification in between -- see IsRealExit()'s comment
-        // for why a single, un-looped waitpid() call is not enough to conclude a traced child has
-        // died: there can be more than one stop notification queued ahead of the eventual death,
-        // and picking up one of those instead (e.g. right after sending SIGKILL, to confirm it
-        // took effect) means observing a status that looks like an exit but is not one -- or,
-        // worse, simply not noticing the child is still alive at all. Writes the exit code to
-        // *exitCode (mirroring ExitCodeFromStatus()) when it is not null. Returns false only if
+        // Polls waitpid(pid, ..., WNOHANG) until the process actually terminates (IsRealExit()
+        // true) or a generous bound elapses, discarding any WIFSTOPPED notification in between --
+        // see IsRealExit()'s comment for why a single check is not enough to conclude a traced
+        // child has died: there can be more than one stop notification queued ahead of the
+        // eventual death, and picking up one of those instead (e.g. right after sending SIGKILL,
+        // to confirm it took effect) means observing a status that looks like an exit but is not
+        // one -- or, worse, simply not noticing the child is still alive at all. Writes the exit
+        // code to *exitCode (mirroring ExitCodeFromStatus()) when it is not null. Returns false if
         // pid could never be waited on at all (waitpid() itself failed, e.g. ECHILD -- already
-        // reaped, or never existed).
+        // reaped, or never existed) or if the bound elapsed without observing a real exit.
+        //
+        // Polled rather than a single blocking waitpid(pid, &status, 0): milestone 2 task 6
+        // measured (see its task report) that a blocking waitpid() issued on this same kind of
+        // pid can simply never return, even though the identical state change is visible moments
+        // later to a WNOHANG poll of the same pid -- reproduced for a call immediately following
+        // a fresh ptrace(PT_ATTACHEXC), but this function has no such guarantee about every
+        // caller's history with pid (Terminate(), exceptionLoop()'s own teardown), so the same
+        // protection is worth having here too. This also bounds what used to be an unconditional
+        // block: a caller reaching this function after DetachAndKill()'s SIGKILL has, until now,
+        // had no way to fail loudly and quickly if pid somehow never dies -- an open-ended
+        // waitpid() just makes that look like a slow test, not a failing one.
         static bool WaitForRealExit(pid_t pid, int* exitCode);
 
         // Detaches ptrace, then SIGKILLs pid, then blocks until it actually dies

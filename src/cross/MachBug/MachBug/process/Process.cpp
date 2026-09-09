@@ -4,6 +4,20 @@
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <csignal>
+#include <unistd.h>
+
+namespace
+{
+    // WaitForRealExit()'s WNOHANG poll: interval and bound. 20ms mirrors both
+    // Debugger.Loop.cpp's exceptionLoop() (kExitPollIntervalMs) and Debugger::Attach()'s own
+    // post-ptrace(PT_ATTACHEXC) poll -- the same validated shape, reused here for a third
+    // blocking-waitpid() call this codebase has now needed to stop making. ~10s is generous for
+    // a SIGKILL confirmation that is normally near-instant; the point is a finite bound, not a
+    // tight one -- a caller that hits it has a real problem worth a fast, loud failure, not
+    // fifteen more minutes of silence.
+    constexpr useconds_t kWaitForRealExitPollIntervalUs = 20000;
+    constexpr int kWaitForRealExitMaxAttempts = 500;
+}
 
 namespace MachBug
 {
@@ -75,24 +89,28 @@ namespace MachBug
 
     bool Process::WaitForRealExit(const pid_t pid, int* const exitCode)
     {
-        for(;;)
+        for(int attempt = 0; attempt < kWaitForRealExitMaxAttempts; ++attempt)
         {
             int status = 0;
-            const pid_t result = waitpid(pid, &status, 0);
+            const pid_t result = waitpid(pid, &status, WNOHANG);
             if(result == -1)
                 return false; // e.g. ECHILD: already reaped, or never existed
 
-            if(IsRealExit(status))
+            if(result == pid && IsRealExit(status))
             {
                 if(exitCode)
                     *exitCode = ExitCodeFromStatus(status);
                 return true;
             }
 
-            // WIFSTOPPED: not a termination -- a ptrace-visible stop (PT_ATTACHEXC, see
-            // Debugger.Loop.cpp::Start()) reported through waitpid(), same as IsRealExit()'s
-            // comment describes. Keep waiting for the state change that actually is one.
+            // Either result == 0 (no state change yet) or result == pid with WIFSTOPPED (a
+            // ptrace-visible stop, PT_ATTACHEXC, see Debugger.Loop.cpp::Start() -- not a
+            // termination, same as IsRealExit()'s comment describes). Keep polling for the state
+            // change that actually is one.
+            usleep(kWaitForRealExitPollIntervalUs);
         }
+        return false; // bound elapsed without observing a real exit -- see this method's comment
+                       // in Process.h for why that is a bound, not a bug, and why it exists at all.
     }
 
     bool Process::DetachAndKill(const pid_t pid, int* const exitCode)

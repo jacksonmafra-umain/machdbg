@@ -81,9 +81,14 @@ namespace MachBug
             // exception ports through, and no other path back to it -- so kill it now rather
             // than leaking a permanently suspended process. SIGKILL terminates a stopped
             // process directly; it does not need to be resumed first.
+            //
+            // Process::WaitForRealExit(), not a bare waitpid(pid, &status, 0): the latter was a
+            // single blocking call with the exact shape Task 6 measured can simply never return
+            // (see that function's own comment in Process.h/.cpp) -- reusing it here, rather than
+            // repeating the pattern, gets this call site the same bounded, WNOHANG-polled fix for
+            // free instead of leaving a second copy of the bug it was fixed for.
             kill(pid, SIGKILL);
-            int status = 0;
-            waitpid(pid, &status, 0);
+            Process::WaitForRealExit(pid, nullptr);
             return false;
         }
 
