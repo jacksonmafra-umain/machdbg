@@ -128,7 +128,11 @@ namespace
     DbgStatus vtStatus(DbgStatus s) { return s; }
 }
 
-TEST_CASE("unimplemented vtable entries are discoverable stubs, not null function pointers")
+// The entry list this test walks is deliberately the *whole* memory/register/module/breakpoint
+// surface, not only the unimplemented part: what it holds is that every entry is callable and
+// says something honest about itself. Which of them are stubs shrinks each milestone -- registers
+// and memory left that set in milestone 3 -- and the assertions below move with it.
+TEST_CASE("every vtable entry is callable and answers honestly about itself")
 {
     DbgEngineCallbacks callbacks{};
     DbgEngine* engine = MachBugCreate(&callbacks);
@@ -153,22 +157,35 @@ TEST_CASE("unimplemented vtable entries are discoverable stubs, not null functio
     REQUIRE(engine->GetHwBreakpointSlots != nullptr);
 
     uint64_t dummy = 0;
+
+    // Registers and memory are implemented as of milestone 3, so they no longer answer
+    // NotSupported: with nothing launched they answer NotAttached, which is a different and more
+    // useful sentence -- "this engine can do that, but not yet, because there is no target".
+    // Asserting the *old* status here would have this test fail the day the feature landed, and
+    // asserting nothing would let a regression to a stub go unnoticed.
     DbgRegisters regs{};
-    REQUIRE(vtStatus(engine->GetRegisters(engine->impl, 0, &regs)) == DbgStatus_NotSupported);
-    REQUIRE(vtStatus(engine->SetRegister(engine->impl, 0, "rip", 0)) == DbgStatus_NotSupported);
-
-    uint32_t count = 123;
-    REQUIRE(engine->GetRegisterDescs(engine->impl, DbgArch_Arm64, &count) == nullptr);
-    REQUIRE(count == 0);
-
-    REQUIRE(vtStatus(engine->MemRead(engine->impl, 0, &dummy, sizeof(dummy))) == DbgStatus_NotSupported);
-    REQUIRE(vtStatus(engine->MemWrite(engine->impl, 0, &dummy, sizeof(dummy))) == DbgStatus_NotSupported);
-    REQUIRE(vtStatus(engine->MemFindBaseAddr(engine->impl, 0, &dummy, &dummy)) == DbgStatus_NotSupported);
+    REQUIRE(vtStatus(engine->GetRegisters(engine->impl, 0, &regs)) == DbgStatus_NotAttached);
+    REQUIRE(vtStatus(engine->SetRegister(engine->impl, 0, "rip", 0)) == DbgStatus_NotAttached);
+    REQUIRE(vtStatus(engine->MemRead(engine->impl, 0, &dummy, sizeof(dummy))) == DbgStatus_NotAttached);
+    REQUIRE(vtStatus(engine->MemWrite(engine->impl, 0, &dummy, sizeof(dummy))) == DbgStatus_NotAttached);
+    REQUIRE(vtStatus(engine->MemFindBaseAddr(engine->impl, 0, &dummy, &dummy)) == DbgStatus_NotAttached);
     REQUIRE_FALSE(engine->MemIsCodePtr(engine->impl, 0));
     REQUIRE_FALSE(engine->MemIsValidPtr(engine->impl, 0));
 
+    // The descriptor table is the one entry that answers with no target at all, because it is
+    // data rather than a question about a process.
+    uint32_t count = 123;
+    REQUIRE(engine->GetRegisterDescs(engine->impl, DbgArch_Arm64, &count) != nullptr);
+    REQUIRE(count == 34);
+
+    // ...and an architecture nothing implements still gets nothing, so the table cannot hand a
+    // caller the wrong register file.
     count = 123;
-    REQUIRE(vtStatus(engine->MemEnumRegions(engine->impl, nullptr, 0, &count)) == DbgStatus_NotSupported);
+    REQUIRE(engine->GetRegisterDescs(engine->impl, DbgArch_I386, &count) == nullptr);
+    REQUIRE(count == 0);
+
+    count = 123;
+    REQUIRE(vtStatus(engine->MemEnumRegions(engine->impl, nullptr, 0, &count)) == DbgStatus_NotAttached);
     REQUIRE(count == 0);
 
     REQUIRE(vtStatus(engine->ModBaseFromAddr(engine->impl, 0, &dummy)) == DbgStatus_NotSupported);
@@ -552,6 +569,144 @@ TEST_CASE("attach takes control of a process machdbg did not launch, and Stop te
          << ") -- expected -1/ESRCH for a pid that is actually dead");
     REQUIRE(rc == -1);
     REQUIRE(errno == ESRCH);
+
+    MachBugDestroy(engine);
+}
+
+// Milestone 3 task 5: the same registers and memory the engine's own tests cover, reached only
+// through the C contract a Qt view will actually call -- no MachBug::Debugger, no MachBug::arch.
+// The stop is reached with a callback that deliberately does *not* answer it, so the target stays
+// parked while every assertion runs.
+namespace
+{
+    struct StopHarness
+    {
+        std::atomic<bool> stopped{false};
+        std::atomic<bool> startReturned{false};
+    };
+
+    void onStopHarnessSystemBreakpoint(void* userdata)
+    {
+        static_cast<StopHarness*>(userdata)->stopped.store(true, std::memory_order_release);
+    }
+}
+
+TEST_CASE("the vtable reports registers and memory for a stopped target")
+{
+    StopHarness harness;
+    DbgEngineCallbacks callbacks{};
+    callbacks.onSystemBreakpoint = onStopHarnessSystemBreakpoint;
+    callbacks.userdata = &harness;
+
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+
+    const std::string path = FIXTURE("run_endlessly");
+    DbgLaunchSpec spec{};
+    spec.path = path.c_str();
+
+    std::thread startThread([&] {
+        engine->Start(engine->impl, &spec);
+        harness.startReturned.store(true, std::memory_order_release);
+    });
+
+    for(int i = 0; i < 500 && !harness.stopped.load(std::memory_order_acquire) &&
+                   !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool stopped = harness.stopped.load(std::memory_order_acquire);
+
+    const DbgArch arch = engine->GetArch(engine->impl);
+    uint32_t count = 0;
+    const DbgRegisterDesc* descs = engine->GetRegisterDescs(engine->impl, arch, &count);
+    const bool haveDescs = descs != nullptr && count > 0;
+
+    DbgRegisters regs{};
+    const DbgStatus registersResult = engine->GetRegisters(engine->impl, 0, &regs);
+
+    // Reading the program counter through the descriptor table, not through the struct field:
+    // this is the assertion that makes the table trustworthy for a view that only has the table.
+    // The offset is relative to the active arm of the union (machbug_api.h), so the base is that
+    // arm rather than &regs.
+    uint64_t throughTable = 0;
+    if(haveDescs)
+    {
+        const uint8_t* base = arch == DbgArch_Arm64
+            ? reinterpret_cast<const uint8_t*>(&regs.arm64)
+            : reinterpret_cast<const uint8_t*>(&regs.x86_64);
+        for(uint32_t i = 0; i < count; ++i)
+        {
+            if((descs[i].flags & DbgRegisterFlag_ProgramCounter) != 0)
+                std::memcpy(&throughTable, base + descs[i].offset, sizeof(throughTable));
+        }
+    }
+
+    uint8_t byte = 0;
+    const DbgStatus readResult = engine->MemRead(engine->impl, throughTable, &byte, 1);
+    const bool isCode = engine->MemIsCodePtr(engine->impl, throughTable);
+    const bool isValid = engine->MemIsValidPtr(engine->impl, throughTable);
+    const bool nullIsValid = engine->MemIsValidPtr(engine->impl, 0x10);
+
+    uint64_t base = 0;
+    uint64_t size = 0;
+    const DbgStatus baseResult = engine->MemFindBaseAddr(engine->impl, throughTable, &base, &size);
+
+    DbgMemoryRegion regions[64]{};
+    uint32_t regionCount = 0;
+    const DbgStatus enumResult = engine->MemEnumRegions(engine->impl, regions, 64, &regionCount);
+
+    // Torn down before the assertions, the same way the attach test above does it: Stop(), a
+    // bounded wait, join if it finished and detach if it did not, so a regression in teardown is
+    // a fast failure rather than a hung binary or a std::terminate from a joinable thread.
+    engine->Stop(engine->impl);
+    for(int i = 0; i < 500 && !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if(harness.startReturned.load(std::memory_order_acquire))
+        startThread.join();
+    else
+        startThread.detach();
+
+    INFO("last engine diagnostic: " << DbgLastErrorString());
+    REQUIRE(stopped);
+    REQUIRE(haveDescs);
+    REQUIRE(registersResult == DbgStatus_Ok);
+    REQUIRE(regs.arch == arch);
+    REQUIRE(throughTable > 0x1000);
+
+    REQUIRE(readResult == DbgStatus_Ok);
+    REQUIRE(isCode);
+    REQUIRE(isValid);
+    REQUIRE_FALSE(nullIsValid);
+
+    REQUIRE(baseResult == DbgStatus_Ok);
+    REQUIRE(base <= throughTable);
+    REQUIRE(throughTable < base + size);
+
+    REQUIRE(enumResult == DbgStatus_Ok);
+    REQUIRE(regionCount > 0);
+    REQUIRE(regions[0].size > 0);
+
+    MachBugDestroy(engine);
+}
+
+TEST_CASE("the vtable refuses a register read with no stop to read from")
+{
+    DbgEngineCallbacks callbacks{};
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+
+    // Never started: there is no target, let alone a stopped thread.
+    DbgRegisters regs{};
+    REQUIRE(engine->GetRegisters(engine->impl, 0, &regs) == DbgStatus_NotAttached);
+    REQUIRE_FALSE(std::string(DbgLastErrorString()).empty());
+
+    REQUIRE(engine->SetRegister(engine->impl, 0, "pc", 0) == DbgStatus_NotAttached);
+    uint8_t byte = 0;
+    REQUIRE(engine->MemRead(engine->impl, 0x1000, &byte, 1) == DbgStatus_NotAttached);
+
+    // A table is data and answers regardless: a view can lay out its rows before a target exists.
+    uint32_t count = 0;
+    REQUIRE(engine->GetRegisterDescs(engine->impl, DbgArch_Arm64, &count) != nullptr);
+    REQUIRE(count == 34);
 
     MachBugDestroy(engine);
 }

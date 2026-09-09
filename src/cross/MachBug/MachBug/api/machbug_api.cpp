@@ -34,10 +34,17 @@
 // divergence machbug_api.h's vtable exists to prevent. See MachBugEngine::cbSystemBreakpoint()
 // below.
 #include <MachBug/api/machbug_api.h>
+#include <MachBug/arch/Arch.h>
 #include <MachBug/core/Debugger.h>
+#include <MachBug/memory/Memory.h>
+
+#include <mach/vm_prot.h>
+#include <sys/sysctl.h>
+#include <sys/proc.h>
 
 #include <atomic>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -239,14 +246,27 @@ namespace
         return engine ? engine->GetPid() : 0;
     }
 
-    DbgArch vtGetArch(void* /*impl*/)
+    DbgArch vtGetArch(void* impl)
     {
-        // Placeholder until milestone 3 gives this engine a real way to inspect a target's
-        // architecture (that needs register/module access this milestone does not implement --
-        // see this file's header comment on the null-vs-stub decision). Reports the host's own
-        // architecture, which is correct for the only configuration this milestone's own tests
-        // exercise -- a native, non-translated target -- and wrong for one running under
-        // Rosetta, which stays out of scope until milestone 3.
+        // The host's architecture unless the target is translated. A Rosetta process carries
+        // P_TRANSLATED (0x00020000, sys/proc.h) in its p_flag, which is the only thing that
+        // distinguishes it from a native one without reading its Mach-O header -- and reading
+        // that needs the main image's base address, which is milestone 5's work.
+        //
+        // Note the limit this reports rather than hides: knowing a target is x86-64 is not the
+        // same as being able to read it. A translated target's *thread state* is the translator's
+        // arm64 state, so GetRegisters() on one cannot answer with x86-64 registers, and
+        // MachBug::arch says so in its diagnostic. Reporting the architecture correctly is what
+        // lets a caller understand that refusal instead of seeing a contradiction.
+        if(auto* engine = toEngine(impl); engine && engine->GetPid() > 0)
+        {
+            struct kinfo_proc info{};
+            size_t length = sizeof(info);
+            int name[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, engine->GetPid() };
+            if(sysctl(name, 4, &info, &length, nullptr, 0) == 0 && length > 0 &&
+               (info.kp_proc.p_flag & P_TRANSLATED) != 0)
+                return DbgArch_X86_64;
+        }
 #if defined(__arm64__) || defined(__aarch64__)
         return DbgArch_Arm64;
 #elif defined(__x86_64__)
@@ -256,60 +276,231 @@ namespace
 #endif
     }
 
-    // Everything below is milestone 3 (memory, registers) or milestone 4 (breakpoints) work --
-    // see this file's header comment for why each is a stub returning a named "not supported"
-    // result rather than a null pointer.
-
-    DbgStatus vtGetRegisters(void* /*impl*/, uint64_t /*threadId*/, DbgRegisters* /*out*/)
+    // Registers and memory, milestone 3's work. Everything below *these* is still milestone 4
+    // (breakpoints) or 5 (modules) work -- see this file's header comment for why each of those
+    // is a stub returning a named "not supported" result rather than a null pointer.
+    //
+    // Each entry here is the same three moves: recover the engine, call into MachBug::arch or
+    // MachBug::memory, and turn a false return plus its diagnostic into a DbgStatus plus
+    // tlsLastError. The status vocabulary, so it stays consistent across all nine:
+    //   NotAttached      -- no engine, or no target at all
+    //   InvalidArgument  -- a target, but the request cannot name what it asks for: nothing is
+    //                       stopped (so there are no registers), the thread id names no thread,
+    //                       the register name is not in the table, or an output pointer is null
+    //   Failed           -- the target is there and the request is well formed, but the kernel
+    //                       refused it (an unmapped address, a page that cannot be made writable)
+    // A status alone cannot tell those apart, which is why every failure also leaves the
+    // diagnostic behind DbgLastErrorString().
+    // Both remaining causes -- nothing is stopped, or the thread id/register name names nothing
+    // -- are InvalidArgument: the target exists and the kernel was never asked anything, so
+    // Failed would be wrong. What tells them apart is the diagnostic, which is why it is stored
+    // here rather than summarised into a status that cannot carry it.
+    DbgStatus registerFailure(const MachBugEngine* engine, const std::string& error)
     {
-        return DbgStatus_NotSupported;
+        tlsLastError = error;
+        if(!engine || engine->GetPid() <= 0)
+            return DbgStatus_NotAttached;
+        return DbgStatus_InvalidArgument;
     }
 
-    DbgStatus vtSetRegister(void* /*impl*/, uint64_t /*threadId*/, const char* /*name*/,
-                             uint64_t /*value*/)
+    DbgStatus vtGetRegisters(void* impl, uint64_t threadId, DbgRegisters* out)
     {
-        return DbgStatus_NotSupported;
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetPid() <= 0)
+        {
+            tlsLastError = "no target: launch or attach before reading registers";
+            return DbgStatus_NotAttached;
+        }
+        if(!out)
+        {
+            tlsLastError = "no DbgRegisters to fill";
+            return DbgStatus_InvalidArgument;
+        }
+
+        std::string error;
+        if(!MachBug::arch::Read(vtGetArch(impl), engine->ResolveThread(threadId), out, &error))
+            return registerFailure(engine, error);
+        return DbgStatus_Ok;
     }
 
-    const DbgRegisterDesc* vtGetRegisterDescs(void* /*impl*/, DbgArch /*arch*/, uint32_t* count)
+    DbgStatus vtSetRegister(void* impl, uint64_t threadId, const char* name, uint64_t value)
     {
-        if(count)
-            *count = 0;
-        return nullptr;
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetPid() <= 0)
+        {
+            tlsLastError = "no target: launch or attach before writing a register";
+            return DbgStatus_NotAttached;
+        }
+
+        std::string error;
+        if(!MachBug::arch::Write(vtGetArch(impl), engine->ResolveThread(threadId), name, value,
+                                 &error))
+            return registerFailure(engine, error);
+        return DbgStatus_Ok;
     }
 
-    DbgStatus vtMemRead(void* /*impl*/, uint64_t /*addr*/, void* /*dest*/, uint64_t /*size*/)
+    const DbgRegisterDesc* vtGetRegisterDescs(void* /*impl*/, DbgArch arch, uint32_t* count)
     {
-        return DbgStatus_NotSupported;
+        // No engine needed, and deliberately no target either: a table is data, so a view can
+        // lay out its rows before anything is launched.
+        return MachBug::arch::Descriptors(arch, count);
     }
 
-    DbgStatus vtMemWrite(void* /*impl*/, uint64_t /*addr*/, const void* /*src*/, uint64_t /*size*/)
+    DbgStatus vtMemRead(void* impl, uint64_t addr, void* dest, uint64_t size)
     {
-        return DbgStatus_NotSupported;
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before reading memory";
+            return DbgStatus_NotAttached;
+        }
+
+        std::string error;
+        if(!MachBug::memory::Read(engine->GetTaskPort(), addr, dest, size, &error))
+        {
+            tlsLastError = error;
+            return dest == nullptr || size == 0 ? DbgStatus_InvalidArgument : DbgStatus_Failed;
+        }
+        return DbgStatus_Ok;
     }
 
-    DbgStatus vtMemFindBaseAddr(void* /*impl*/, uint64_t /*addr*/, uint64_t* /*base*/,
-                                 uint64_t* /*size*/)
+    DbgStatus vtMemWrite(void* impl, uint64_t addr, const void* src, uint64_t size)
     {
-        return DbgStatus_NotSupported;
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before writing memory";
+            return DbgStatus_NotAttached;
+        }
+
+        std::string error;
+        if(!MachBug::memory::Write(engine->GetTaskPort(), addr, src, size, &error))
+        {
+            tlsLastError = error;
+            return src == nullptr || size == 0 ? DbgStatus_InvalidArgument : DbgStatus_Failed;
+        }
+        return DbgStatus_Ok;
     }
 
-    bool vtMemIsCodePtr(void* /*impl*/, uint64_t /*addr*/)
+    DbgStatus vtMemFindBaseAddr(void* impl, uint64_t addr, uint64_t* base, uint64_t* size)
     {
-        return false;
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before asking about an address";
+            return DbgStatus_NotAttached;
+        }
+
+        MachBug::memory::Region region{};
+        std::string error;
+        if(!MachBug::memory::RegionOf(engine->GetTaskPort(), addr, &region, &error))
+        {
+            tlsLastError = error;
+            return DbgStatus_Failed;
+        }
+
+        // mach_vm_region answers with the first region at *or above* the address it is given, so
+        // an address in an unmapped hole comes back described by the next mapping up. Reporting
+        // that as this address's base would be a lie a caller cannot detect.
+        if(addr < region.base || addr >= region.base + region.size)
+        {
+            tlsLastError = "no mapped region contains this address";
+            return DbgStatus_Failed;
+        }
+
+        if(base)
+            *base = region.base;
+        if(size)
+            *size = region.size;
+        return DbgStatus_Ok;
     }
 
-    bool vtMemIsValidPtr(void* /*impl*/, uint64_t /*addr*/)
+    // The two predicates return bool and so cannot carry a status; they still leave a diagnostic
+    // behind, because "false" from either of them is exactly the answer a caller most often
+    // wants explained.
+    bool vtMemIsCodePtr(void* impl, uint64_t addr)
     {
-        return false;
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before asking about an address";
+            return false;
+        }
+
+        MachBug::memory::Region region{};
+        std::string error;
+        if(!MachBug::memory::RegionOf(engine->GetTaskPort(), addr, &region, &error))
+        {
+            tlsLastError = error;
+            return false;
+        }
+        if(addr < region.base || addr >= region.base + region.size)
+        {
+            tlsLastError = "no mapped region contains this address";
+            return false;
+        }
+        return (region.protection & VM_PROT_EXECUTE) != 0;
     }
 
-    DbgStatus vtMemEnumRegions(void* /*impl*/, DbgMemoryRegion* /*out*/, uint32_t /*capacity*/,
+    bool vtMemIsValidPtr(void* impl, uint64_t addr)
+    {
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before asking about an address";
+            return false;
+        }
+
+        MachBug::memory::Region region{};
+        std::string error;
+        if(!MachBug::memory::RegionOf(engine->GetTaskPort(), addr, &region, &error))
+        {
+            tlsLastError = error;
+            return false;
+        }
+        // Mapped *and* readable: a region with no VM_PROT_READ is a guard page, and a caller
+        // asking whether a pointer is valid is asking whether it can be dereferenced.
+        return addr >= region.base && addr < region.base + region.size &&
+               (region.protection & VM_PROT_READ) != 0;
+    }
+
+    DbgStatus vtMemEnumRegions(void* impl, DbgMemoryRegion* out, uint32_t capacity,
                                 uint32_t* count)
     {
         if(count)
             *count = 0;
-        return DbgStatus_NotSupported;
+
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before enumerating regions";
+            return DbgStatus_NotAttached;
+        }
+        if(!out || capacity == 0)
+        {
+            tlsLastError = "no room to write regions into";
+            return DbgStatus_InvalidArgument;
+        }
+
+        // Copied field by field rather than reinterpreted: MachBug::memory::Region is the
+        // engine's own shape and DbgMemoryRegion is the contract's, and nothing should make them
+        // silently depend on having identical layouts.
+        std::vector<MachBug::memory::Region> regions(capacity);
+        const uint32_t found = MachBug::memory::EnumRegions(engine->GetTaskPort(), regions.data(),
+                                                            capacity);
+        for(uint32_t i = 0; i < found; ++i)
+        {
+            out[i] = DbgMemoryRegion{regions[i].base, regions[i].size, regions[i].protection,
+                                     regions[i].maxProtection, regions[i].userTag};
+        }
+        if(count)
+            *count = found;
+        if(found == 0)
+        {
+            tlsLastError = "no regions could be read from this target";
+            return DbgStatus_Failed;
+        }
+        return DbgStatus_Ok;
     }
 
     DbgStatus vtModBaseFromAddr(void* /*impl*/, uint64_t /*addr*/, uint64_t* /*base*/)

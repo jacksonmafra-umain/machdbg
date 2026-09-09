@@ -81,7 +81,12 @@ typedef struct
     uint32_t id;
     const char* name;
     uint16_t bits;
-    uint16_t offset;    /* byte offset into the active arm of DbgRegisters */
+    /* Byte offset into the ACTIVE ARM of DbgRegisters, not into DbgRegisters itself: a consumer
+       reads a register as `*(uint64_t*)((char*)&regs.arm64 + offset)` for DbgArch_Arm64 and from
+       &regs.x86_64 for DbgArch_X86_64, choosing the arm by regs.arch. Offsetting from &regs
+       instead reads the wrong bytes by however much the arch tag and the union's padding
+       occupy -- a mistake nothing at runtime can catch, which is why it is spelled out here. */
+    uint16_t offset;
     uint32_t flags;     /* a mask of DbgRegisterFlag */
 } DbgRegisterDesc;
 
