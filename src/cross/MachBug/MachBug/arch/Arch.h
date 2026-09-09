@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mach/mach.h>
+#include <mach/exception_types.h>
 #include <cstdint>
 #include <string>
 
@@ -24,4 +25,15 @@ namespace MachBug::arch
     bool Read(DbgArch arch, mach_port_t thread, DbgRegisters* out, std::string* error);
     bool Write(DbgArch arch, mach_port_t thread, const char* name, uint64_t value,
                std::string* error);
+
+    // Single-step, per thread, through whichever mechanism `arch` names. Same host restriction as
+    // Read/Write: only the architecture this build was made for can be armed.
+    bool SetSingleStep(DbgArch arch, mach_port_t thread, bool enable, std::string* error);
+
+    // See the per-architecture comment: on x86-64 the single-step trap has its own subcode
+    // (EXC_I386_SGL) and is distinguishable from a breakpoint fault; on arm64 both arrive as
+    // EXC_ARM_BREAKPOINT, so this is necessary but not sufficient there and the breakpoint table
+    // is what tells them apart.
+    bool IsSingleStepTrap(DbgArch arch, exception_type_t exception, const int64_t* code,
+                          uint32_t codeCnt);
 }

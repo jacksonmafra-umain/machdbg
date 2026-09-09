@@ -9,6 +9,7 @@
 // for task_for_pid's most common failure (a missing get-task-allow entitlement) and would be
 // misleading attached to a send/receive error that has nothing to do with entitlements.
 
+#include <MachBug/arch/Arch.h>
 #include <MachBug/core/Debugger.h>
 
 #include <mach/mach_error.h>
@@ -61,8 +62,8 @@ namespace
     //
     // Picked by architecture rather than hardcoded to this development machine's arm64, since
     // x86_64 is in scope from Milestone 3 onward. Both are full general-register state flavors --
-    // the same ones setSingleStep() (below) reads/writes directly via thread_get_state()/
-    // thread_set_state() on the reporting thread's own port, though that call is independent of
+    // the same ones MachBug::arch's SetSingleStep() reads/writes directly via
+    // thread_get_state()/thread_set_state() on the reporting thread's own port, though that call is independent of
     // what flavor the exception PORT itself is configured to describe state as.
 #if defined(__x86_64__)
     constexpr thread_state_flavor_t kExceptionPortStateFlavor = x86_THREAD_STATE64;
@@ -96,43 +97,16 @@ namespace
     // reports new_stateCnt = 0, meaning "unmodified"), so it does not matter that they are a
     // different flavor than what these functions ask thread_get_state()/thread_set_state() for
     // directly.
+// The host's architecture, for the arch-layer calls below. The engine has no architecture query
+// of its own at this level -- that is the C API's GetArch(), which also handles a translated
+// target -- and this loop only ever touches the thread state of a target it is natively
+// debugging, so the host's own architecture is the right answer here.
 #if defined(__arm64__) || defined(__aarch64__)
-    bool setSingleStep(const mach_port_t thread, const bool enable)
-    {
-        arm_debug_state64_t state{};
-        mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
-        if(thread_get_state(thread, ARM_DEBUG_STATE64, reinterpret_cast<thread_state_t>(&state),
-                             &count) != KERN_SUCCESS)
-            return false;
-
-        if(enable)
-            state.__mdscr_el1 |= 1ULL; // MDSCR_EL1 bit 0: SS (hardware single step)
-        else
-            state.__mdscr_el1 &= ~1ULL;
-
-        return thread_set_state(thread, ARM_DEBUG_STATE64, reinterpret_cast<thread_state_t>(&state),
-                                 ARM_DEBUG_STATE64_COUNT) == KERN_SUCCESS;
-    }
+    constexpr DbgArch kLoopArch = DbgArch_Arm64;
 #elif defined(__x86_64__)
-    bool setSingleStep(const mach_port_t thread, const bool enable)
-    {
-        x86_thread_state64_t state{};
-        mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
-        if(thread_get_state(thread, x86_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state),
-                             &count) != KERN_SUCCESS)
-            return false;
-
-        constexpr uint64_t kEflagsTrapFlag = 0x100;
-        if(enable)
-            state.__rflags |= kEflagsTrapFlag;
-        else
-            state.__rflags &= ~kEflagsTrapFlag;
-
-        return thread_set_state(thread, x86_THREAD_STATE64, reinterpret_cast<thread_state_t>(&state),
-                                 x86_THREAD_STATE64_COUNT) == KERN_SUCCESS;
-    }
+    constexpr DbgArch kLoopArch = DbgArch_X86_64;
 #else
-    bool setSingleStep(mach_port_t, bool) { return false; }
+    constexpr DbgArch kLoopArch = DbgArch_Unknown;
 #endif
 
     // Set only around exceptionLoop()'s own call into mach_exc_server(), and read only by
@@ -239,7 +213,7 @@ namespace MachBug
         // "no state, that's fine," it means the kernel silently declines to deliver anything at
         // all. This loop still never reads the state the message carries (handleException() is
         // handed the thread's own port and calls thread_get_state()/thread_set_state() on it
-        // directly when it needs to -- see setSingleStep(), below) -- it just cannot ask for
+        // directly when it needs to -- see MachBug::arch::SetSingleStep()) -- it just cannot ask for
         // *zero* state and expect delivery to still happen.
         kr = task_set_exception_ports(
             mProcess->task,
@@ -449,10 +423,26 @@ namespace MachBug
         // parking, and the park (the mCmdCv.wait() further down) is the entire reason the
         // target does not run again until Continue()/StepInto()/Stop() says so.
 
-        const bool wasStepCompletion = mStepArmed;
-        mStepArmed = false;
+        // A step is complete when a step was armed AND this exception is the trap a step
+        // produces. Testing mStepArmed alone -- which is what this did until milestone 4 --
+        // reports the *next* exception of any kind as a completed step: on x86-64 a signal
+        // passthrough arrived first and was announced as a step whose program counter had not
+        // moved, which is a lie about the target rather than a missed event (issue #97).
+        //
+        // mStepArmed survives an exception that is not the step: the step may still land later,
+        // and forgetting it would leave the trap armed with nothing waiting for it.
+        const bool wasStepCompletion = mStepArmed &&
+            arch::IsSingleStepTrap(kLoopArch, exception, code, codeCnt);
         if(wasStepCompletion)
-            setSingleStep(thread, false); // disarm; re-armed below only if StepInto() is chosen again
+            mStepArmed = false;
+        if(wasStepCompletion)
+        {
+            // Disarmed through the arch layer (arch/Arm64.cpp, arch/X86_64.cpp) rather than here;
+            // re-armed below only if StepInto() is chosen again.
+            std::string stepError;
+            if(!arch::SetSingleStep(kLoopArch, thread, false, &stepError))
+                cbInternalError(stepError);
+        }
 
         // EXC_SOFTWARE with code[0] == EXC_SOFT_SIGNAL is how PT_ATTACHEXC (Start(), above)
         // routes an ordinary BSD signal through this port instead of delivering it directly;
@@ -531,7 +521,8 @@ namespace MachBug
 
         if(decision == Command::StepInto)
         {
-            if(setSingleStep(thread, true))
+            std::string armError;
+            if(arch::SetSingleStep(kLoopArch, thread, true, &armError))
             {
                 mStepArmed = true;
             }
@@ -544,7 +535,7 @@ namespace MachBug
 
         // Returning KERN_SUCCESS is what tells the kernel this exception was handled and the
         // reporting thread should resume -- true for Continue and StepInto alike; the only
-        // difference between them is whether setSingleStep() armed the trap flag just above, not
+        // difference between them is whether SetSingleStep() armed the trap flag just above, not
         // the return code. Stop() takes the same return here (the thread must still be let go,
         // its message answered) and is instead handled by exceptionLoop() killing the child once
         // this reply has gone out; see its comment.

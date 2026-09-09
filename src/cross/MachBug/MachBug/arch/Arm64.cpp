@@ -1,6 +1,7 @@
 #include <MachBug/arch/Arm64.h>
 
 #include <mach/mach_error.h>
+#include <mach/exception_types.h>
 #include <mach/thread_status.h>
 
 #include <cstddef>
@@ -84,6 +85,22 @@ namespace MachBug::arch::Arm64
             return true;
         }
 #endif // defined(__arm64__) || defined(__aarch64__)
+    }
+
+
+    bool IsSingleStepTrap(const exception_type_t exception, const int64_t* code,
+                          const uint32_t codeCnt)
+    {
+        // EXC_ARM_BREAKPOINT (1) is what both a completed single-step and a BRK instruction
+        // arrive as on arm64 -- the subcode does not separate them, so this is a necessary
+        // condition and the breakpoint table is what makes it sufficient. It still rules out the
+        // case that actually bit: a signal passthrough (EXC_SOFTWARE) being mistaken for a step.
+        // Spelled out for the same reason its x86-64 twin is: mach/arm/exception.h is gated on
+        // __arm__ || __arm64__, and an x86-64 build still compiles this file's classification.
+        // mach/arm/exception.h:83.
+        constexpr int64_t kExcArmBreakpoint = 1;
+        return exception == EXC_BREAKPOINT && codeCnt >= 1 && code != nullptr &&
+               code[0] == kExcArmBreakpoint;
     }
 
     const DbgRegisterDesc* Descriptors(uint32_t* count)
@@ -189,6 +206,49 @@ namespace MachBug::arch::Arm64
         return true;
     }
 
+    bool SetSingleStep(const mach_port_t thread, const bool enable, std::string* error)
+    {
+        if(thread == MACH_PORT_NULL)
+        {
+            if(error)
+                *error = "no thread to single-step: the target is not stopped, or the thread id "
+                         "names no thread of it";
+            return false;
+        }
+
+        // ARM_DEBUG_STATE64 is flavor 15, and the struct is bvr/bcr/wvr/wcr plus mdscr_el1. This
+        // function touches only the last of those, and reads the state before writing it back for
+        // that reason: hardware breakpoints and watchpoints live in the same state, so neither
+        // this nor they may clobber the other's registers by writing a zeroed struct.
+        arm_debug_state64_t state{};
+        mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
+        const kern_return_t got = thread_get_state(thread, ARM_DEBUG_STATE64,
+            reinterpret_cast<thread_state_t>(&state), &count);
+        if(got != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_get_state(ARM_DEBUG_STATE64) failed: ") +
+                         mach_error_string(got);
+            return false;
+        }
+
+        if(enable)
+            state.__mdscr_el1 |= 1ULL;   // MDSCR_EL1 bit 0: SS
+        else
+            state.__mdscr_el1 &= ~1ULL;
+
+        const kern_return_t set = thread_set_state(thread, ARM_DEBUG_STATE64,
+            reinterpret_cast<thread_state_t>(&state), ARM_DEBUG_STATE64_COUNT);
+        if(set != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_set_state(ARM_DEBUG_STATE64) failed: ") +
+                         mach_error_string(set);
+            return false;
+        }
+        return true;
+    }
+
 #else
 
     // Not "unimplemented": there is no arm64 thread state to read on x86-64 hardware.
@@ -205,6 +265,13 @@ namespace MachBug::arch::Arm64
     {
         if(error)
             *error = "this build cannot write arm64 thread state: it is not an arm64 build";
+        return false;
+    }
+
+    bool SetSingleStep(mach_port_t, bool, std::string* error)
+    {
+        if(error)
+            *error = "this build cannot single-step arm64 threads: it is not an arm64 build";
         return false;
     }
 

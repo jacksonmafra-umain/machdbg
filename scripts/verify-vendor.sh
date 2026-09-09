@@ -69,6 +69,7 @@ required=(
     src/cross/MachBug/tests/registers_x86_64.cpp
     src/cross/MachBug/tests/memory.cpp
     src/cross/MachBug/tests/register_format.cpp
+    src/cross/MachBug/tests/stepping.cpp
     src/cross/views/cmake.toml
     src/cross/views/CMakeLists.txt
     src/cross/views/RegisterFormat.h
