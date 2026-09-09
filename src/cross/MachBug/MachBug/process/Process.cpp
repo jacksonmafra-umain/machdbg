@@ -4,6 +4,7 @@
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <csignal>
+#include <cstdio>
 #include <unistd.h>
 
 namespace
@@ -124,7 +125,29 @@ namespace MachBug
         if(kill(pid, SIGKILL) != 0)
             return false;
 
-        WaitForRealExit(pid, exitCode);
+        if(!WaitForRealExit(pid, exitCode))
+        {
+            // WaitForRealExit()'s own bound (see its comment) is what makes this reachable at
+            // all: before it existed, a target that would not die simply hung this call forever
+            // -- ugly, but impossible to miss. A bound that just returns here instead, with every
+            // one of this function's three callers (Terminate(), exceptionLoop()'s teardown,
+            // Init()'s task_for_pid-denial cleanup) discarding the result, would make this
+            // function report success while pid may still be alive -- in the one area of this
+            // codebase that has already produced four Criticals, including exactly this shape (a
+            // child that became unkillable even by an external `kill -9`). Not escalated into a
+            // hard failure here -- this function's own contract (Process.h) is "false only if
+            // kill() itself failed", and propagating a hang back into Terminate() would undo the
+            // bound WaitForRealExit() exists for -- but it must not pass silently either: named
+            // on stderr, with the pid, so a stranded process leaves a trace instead of a mystery.
+            std::fprintf(stderr,
+                "MachBug: Process::DetachAndKill(pid %d): SIGKILL sent and ptrace detached, but "
+                "the target did not confirm exit within WaitForRealExit()'s bound -- it may "
+                "still be alive. Nothing further is done automatically; if this pid is still "
+                "running, it needs manual investigation.\n",
+                pid);
+            std::fflush(stderr);
+        }
+
         return true;
     }
 }

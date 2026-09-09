@@ -82,13 +82,13 @@ namespace MachBug
             // than leaking a permanently suspended process. SIGKILL terminates a stopped
             // process directly; it does not need to be resumed first.
             //
-            // Process::WaitForRealExit(), not a bare waitpid(pid, &status, 0): the latter was a
-            // single blocking call with the exact shape Task 6 measured can simply never return
-            // (see that function's own comment in Process.h/.cpp) -- reusing it here, rather than
-            // repeating the pattern, gets this call site the same bounded, WNOHANG-polled fix for
-            // free instead of leaving a second copy of the bug it was fixed for.
-            kill(pid, SIGKILL);
-            Process::WaitForRealExit(pid, nullptr);
+            // Process::DetachAndKill(), not a bare kill()+waitpid(): PT_DETACH is documented
+            // (Process.h) as harmless even when, as here, pid was never ptrace-attached at all --
+            // and routing through the one shared helper, rather than a second hand-rolled
+            // kill()+wait sequence, means this call site gets DetachAndKill()'s own bounded,
+            // WNOHANG-polled wait and its not-silent-on-timeout logging for free, instead of a
+            // second copy of either to keep in sync.
+            Process::DetachAndKill(pid, nullptr);
             return false;
         }
 
