@@ -48,9 +48,10 @@ namespace MachBug::test
     //   - CreateThread/ExitThread: Debugger.h tracks a single thread implicitly (see its own
     //     comment on holding one unique_ptr<Process> rather than ElfBug's map); there is no
     //     per-thread lifecycle callback to record yet.
-    //   - Breakpoint: dispatch that matches an exception address against installed breakpoints
-    //     is explicitly called out in Debugger.h's cbException comment as "a later milestone's
-    //     job, not this task's."
+    //   - Breakpoint: filled in by milestone 4, which added the table that makes the match
+    //     possible. Its Event carries the breakpoint's own address in `address` -- the address
+    //     the user asked for, after the architecture's program-counter fixup, not the raw pc the
+    //     exception arrived with.
     //   - Paused: Pause() (Debugger.h) is synchronous -- task_suspend() has already happened by
     //     the time it returns -- so there is no asynchronous "now paused" notification to wait
     //     on; a caller checks IsStopped() (inherited straight from Debugger, unchanged by this
@@ -65,6 +66,7 @@ namespace MachBug::test
         SystemBreakpoint,
         Resumed,
         Step,
+        Breakpoint,
         Exception,
         InternalError,
     };
@@ -259,6 +261,11 @@ namespace MachBug::test
         void cbResumed() override
         {
             push({EventType::Resumed, {}, 0, 0, 0, 0, {}});
+        }
+
+        void cbBreakpoint(uint64_t address) override
+        {
+            push({EventType::Breakpoint, {}, 0, 0, 0, address, {}});
         }
 
         void cbStep() override

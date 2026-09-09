@@ -76,6 +76,19 @@ namespace MachBug::arch
         }
     }
 
+    uint32_t PcFixupAfterTrap(const DbgArch arch)
+    {
+        switch(arch)
+        {
+        case DbgArch_Arm64:
+            return 0;
+        case DbgArch_X86_64:
+            return 1;
+        default:
+            return 0;
+        }
+    }
+
     bool IsSingleStepTrap(const DbgArch arch, const exception_type_t exception,
                           const int64_t* code, const uint32_t codeCnt)
     {

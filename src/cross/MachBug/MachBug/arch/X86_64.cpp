@@ -139,13 +139,30 @@ namespace MachBug::arch::X86_64
     bool IsSingleStepTrap(const exception_type_t exception, const int64_t* code,
                           const uint32_t codeCnt)
     {
-        // x86-64 does separate them: EXC_I386_SGL (1) is the trap-flag single step and
-        // EXC_I386_BPT (2) is an int3, so on this architecture the classification is exact.
+        // Two shapes, both measured, and the second one is why this function exists at all.
         //
-        // The value is spelled out rather than included: mach/i386/exception.h is gated on
-        // __i386__ || __x86_64__ and this predicate has to compile on an arm64 host, which is
-        // where the dispatch that calls it is built. It is an ABI constant, not a host-dependent
-        // one -- mach/i386/exception.h:108.
+        // MEASURED, and not what the first version of this predicate assumed: a step armed at the
+        // target's first stop completes as EXC_BREAKPOINT, but a step armed to get *off* a
+        // software breakpoint completes as a signal passthrough -- EXC_SOFTWARE carrying
+        // EXC_SOFT_SIGNAL and SIGTRAP, which is how PT_ATTACHEXC routes the debug trap the kernel
+        // raised. Observed as `Exception(type=5,code1=5)` in a timeline where the step was
+        // expected; see tests/breakpoints_software.cpp.
+        //
+        // Accepting that form is safe because every caller asks this only while a step is armed:
+        // a target raising SIGTRAP on its own, with no step pending, never reaches here. Without
+        // it, the completion falls through to cbException and the engine parks a target it was in
+        // the middle of stepping.
+        constexpr int64_t kExcSoftSignal = 0x10003;
+        constexpr int64_t kSigTrap = 5;
+        if(exception == EXC_SOFTWARE && codeCnt >= 2 && code != nullptr &&
+           code[0] == kExcSoftSignal && code[1] == kSigTrap)
+            return true;
+
+        // The other shape: EXC_I386_SGL (1), the trap-flag single step, which x86-64 does keep
+        // distinct from EXC_I386_BPT (2), an int3 -- so on this architecture the classification is
+        // exact. Spelled out rather than included because mach/i386/exception.h:108 is gated on
+        // __i386__ || __x86_64__ and this predicate has to compile on an arm64 host, where the
+        // dispatch that calls it is built. It is an ABI constant, not a host-dependent one.
         constexpr int64_t kExcI386SingleStep = 1;
         return exception == EXC_BREAKPOINT && codeCnt >= 1 && code != nullptr &&
                code[0] == kExcI386SingleStep;

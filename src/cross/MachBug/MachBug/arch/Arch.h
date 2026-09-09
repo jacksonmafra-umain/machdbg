@@ -53,4 +53,10 @@ namespace MachBug::arch
     };
 
     Trap SoftwareTrap(DbgArch arch);
+
+    // How far the program counter has moved past a software trap by the time its exception
+    // arrives, in bytes. Measured, not recalled: 0 on arm64, where BRK traps without retiring,
+    // and 1 on x86-64, where the INT3 byte has already executed -- both asserted exactly by
+    // tests/breakpoints_software.cpp on their own runners.
+    uint32_t PcFixupAfterTrap(DbgArch arch);
 }

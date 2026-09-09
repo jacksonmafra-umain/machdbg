@@ -91,13 +91,30 @@ namespace MachBug::arch::Arm64
     bool IsSingleStepTrap(const exception_type_t exception, const int64_t* code,
                           const uint32_t codeCnt)
     {
-        // EXC_ARM_BREAKPOINT (1) is what both a completed single-step and a BRK instruction
-        // arrive as on arm64 -- the subcode does not separate them, so this is a necessary
-        // condition and the breakpoint table is what makes it sufficient. It still rules out the
-        // case that actually bit: a signal passthrough (EXC_SOFTWARE) being mistaken for a step.
-        // Spelled out for the same reason its x86-64 twin is: mach/arm/exception.h is gated on
-        // __arm__ || __arm64__, and an x86-64 build still compiles this file's classification.
-        // mach/arm/exception.h:83.
+        // Two shapes, both measured, and the second one is why this function exists at all.
+        //
+        // MEASURED, and not what the first version of this predicate assumed: a step armed at the
+        // target's first stop completes as EXC_BREAKPOINT, but a step armed to get *off* a
+        // software breakpoint completes as a signal passthrough -- EXC_SOFTWARE carrying
+        // EXC_SOFT_SIGNAL and SIGTRAP, which is how PT_ATTACHEXC routes the debug trap the kernel
+        // raised. Observed as `Exception(type=5,code1=5)` in a timeline where the step was
+        // expected; see tests/breakpoints_software.cpp.
+        //
+        // Accepting that form is safe because every caller asks this only while a step is armed:
+        // a target raising SIGTRAP on its own, with no step pending, never reaches here. Without
+        // it, the completion falls through to cbException and the engine parks a target it was in
+        // the middle of stepping.
+        constexpr int64_t kExcSoftSignal = 0x10003;
+        constexpr int64_t kSigTrap = 5;
+        if(exception == EXC_SOFTWARE && codeCnt >= 2 && code != nullptr &&
+           code[0] == kExcSoftSignal && code[1] == kSigTrap)
+            return true;
+
+        // The other shape: EXC_ARM_BREAKPOINT (1), which is what both a completed single-step and
+        // a BRK instruction arrive as -- the subcode does not separate them, so this is necessary
+        // here and the breakpoint table is what makes it sufficient in the exception loop.
+        // Spelled out rather than included because mach/arm/exception.h:83 is gated on
+        // __arm__ || __arm64__ and an x86-64 build still compiles this file.
         constexpr int64_t kExcArmBreakpoint = 1;
         return exception == EXC_BREAKPOINT && codeCnt >= 1 && code != nullptr &&
                code[0] == kExcArmBreakpoint;

@@ -401,6 +401,15 @@ namespace MachBug
 
         if(mStopRequested.load(std::memory_order_acquire) && mProcess)
         {
+            // The target gets its own bytes back before this engine lets go of it. A detached
+            // target still carrying a trap runs into it with no debugger listening and dies of a
+            // SIGTRAP nobody asked for -- and until this was here, Stop() itself hung: the loop
+            // was already gone, so that trap's exception had no one left to answer it.
+            std::string restoreError;
+            if(!mBreakpoints.RestoreAll(mProcess->task, kLoopArch, &restoreError))
+                cbInternalError("could not remove this engine's breakpoints from the target "
+                                 "before detaching: " + restoreError);
+
             // Process::DetachAndKill(), not a bare kill()+waitpid(): this pid is still
             // ptrace(PT_ATTACHEXC)'d (Start(), above), and this is the one place in this class
             // that is guaranteed to be reached with nobody left servicing the exception port --
@@ -442,6 +451,55 @@ namespace MachBug
             std::string stepError;
             if(!arch::SetSingleStep(kLoopArch, thread, false, &stepError))
                 cbInternalError(stepError);
+        }
+
+        // The second half of the restore-step-re-arm cycle (spec section 6). Getting off a
+        // software breakpoint means taking its trap out, advancing one instruction, and putting
+        // the trap back -- and this is where the step that did the advancing lands.
+        //
+        // Reported to the caller only if they asked for a step. A Continue() that happened to
+        // start on a breakpoint must not look like a step to whoever is watching: the step is
+        // this engine's own machinery for leaving an address it had patched.
+        if(mSteppingOverBreakpoint && wasStepCompletion)
+        {
+            mSteppingOverBreakpoint = false;
+
+            // MEASURED: the step that gets a target off a breakpoint completes as a SIGTRAP
+            // passthrough, and answering that exception with KERN_SUCCESS is not enough to stop
+            // the kernel from then delivering the signal -- whose default action kills the
+            // target. The first version of this cycle did exactly that, and the fixture died with
+            // ExitProcess(code=-5).
+            //
+            // PT_THUPDATE is the request that decides a passed-through signal's fate: its third
+            // argument is the thread port and its fourth is the signal to deliver, so zero means
+            // deliver nothing. The trap belongs to this engine's own machinery -- the target
+            // never asked for it and must not see it.
+            if(mProcess)
+            {
+                errno = 0;
+                if(ptrace(PT_THUPDATE, mProcess->pid,
+                          reinterpret_cast<caddr_t>(static_cast<uintptr_t>(thread)), 0) == -1 &&
+                   errno != 0)
+                {
+                    cbInternalError(std::string("could not suppress the step's SIGTRAP: ") +
+                                     std::strerror(errno));
+                }
+            }
+
+            std::string rearmError;
+            if(mStoppedAtBreakpoint != 0 && mProcess &&
+               !mBreakpoints.Arm(mProcess->task, kLoopArch, mStoppedAtBreakpoint, &rearmError))
+            {
+                // Loud, because the alternative is a breakpoint the user still sees in the list
+                // and the target no longer carries -- the failure mode hardest to notice.
+                cbInternalError("could not re-arm the breakpoint after stepping off it: " +
+                                 rearmError);
+            }
+            mStoppedAtBreakpoint = 0;
+
+            if(!mStepWasRequested)
+                return KERN_SUCCESS;   // resume, silently: nobody asked to be told about this
+            mStepWasRequested = false;
         }
 
         // EXC_SOFTWARE with code[0] == EXC_SOFT_SIGNAL is how PT_ATTACHEXC (Start(), above)
@@ -488,7 +546,50 @@ namespace MachBug
             mPendingCommand = Command::None;
         }
 
-        if(wasStepCompletion)
+        // Is this one of ours? Identified by address rather than by exception code: both
+        // architectures report a software trap as EXC_BREAKPOINT, and the accompanying code says
+        // which *kind* of debug event it was, never which of this engine's breakpoints. Only the
+        // table knows that.
+        uint64_t hitBreakpoint = 0;
+        if(!wasStepCompletion && exception == EXC_BREAKPOINT && mSeenFirstStop)
+        {
+            DbgRegisters regs{};
+            std::string readError;
+            if(arch::Read(kLoopArch, thread, &regs, &readError))
+            {
+                const uint64_t pc = kLoopArch == DbgArch_Arm64 ? regs.arm64.pc : regs.x86_64.rip;
+                const uint32_t fixup = arch::PcFixupAfterTrap(kLoopArch);
+                const uint64_t candidate = pc - fixup;
+                const auto entry = mBreakpoints.Find(candidate);
+                if(entry && entry->armed)
+                {
+                    hitBreakpoint = candidate;
+
+                    // Rewound before anyone is told, so the caller sees the address it asked for
+                    // and a resume re-executes the instruction the trap replaced. On arm64 the
+                    // fixup is zero and this does nothing; on x86-64 it is the difference between
+                    // resuming correctly and resuming one byte into an instruction.
+                    if(fixup != 0)
+                    {
+                        std::string writeError;
+                        if(!arch::Write(kLoopArch, thread, "rip", candidate, &writeError))
+                            cbInternalError("could not rewind the program counter onto the "
+                                             "breakpoint: " + writeError);
+                    }
+                }
+            }
+            else
+            {
+                cbInternalError(readError);
+            }
+        }
+
+        if(hitBreakpoint != 0)
+        {
+            mStoppedAtBreakpoint = hitBreakpoint;
+            cbBreakpoint(hitBreakpoint);
+        }
+        else if(wasStepCompletion)
         {
             cbStep();
         }
@@ -517,6 +618,30 @@ namespace MachBug
             // Cleared with the stop it belonged to: a caller that reads registers from a thread
             // that is running again gets a torn answer, and no error to tell it so.
             mStoppedThread.store(MACH_PORT_NULL, std::memory_order_release);
+        }
+
+        // Leaving a breakpoint's own address means the trap cannot be there when the target
+        // resumes, or it traps again immediately on the instruction it never got to execute.
+        // Take it out, step once, and the completion above puts it back.
+        if(mStoppedAtBreakpoint != 0 &&
+           (decision == Command::Continue || decision == Command::StepInto))
+        {
+            std::string cycleError;
+            if(mProcess &&
+               mBreakpoints.Disarm(mProcess->task, kLoopArch, mStoppedAtBreakpoint, &cycleError) &&
+               arch::SetSingleStep(kLoopArch, thread, true, &cycleError))
+            {
+                mStepArmed = true;
+                mSteppingOverBreakpoint = true;
+                mStepWasRequested = decision == Command::StepInto;
+                return KERN_SUCCESS;
+            }
+
+            // Neither half worked, so the breakpoint is still in the target and resuming would
+            // trap on it forever. Say so and resume anyway: a hung target is worse than a
+            // reported failure, and the caller can remove the breakpoint.
+            cbInternalError("could not step off the breakpoint: " + cycleError);
+            mStoppedAtBreakpoint = 0;
         }
 
         if(decision == Command::StepInto)
@@ -626,6 +751,11 @@ namespace MachBug
         return mIsRunning.load(std::memory_order_acquire);
     }
 
+    Breakpoints& Debugger::BreakpointTable()
+    {
+        return mBreakpoints;
+    }
+
     mach_port_t Debugger::StoppedThread() const
     {
         return mStoppedThread.load(std::memory_order_acquire);
@@ -668,6 +798,7 @@ namespace MachBug
     void Debugger::cbCreateProcessEvent(pid_t) {}
     void Debugger::cbExitProcessEvent(int) {}
     void Debugger::cbSystemBreakpoint() {}
+    void Debugger::cbBreakpoint(uint64_t) {}
     void Debugger::cbResumed() {}
     void Debugger::cbStep() {}
     void Debugger::cbException(uint32_t, uint64_t) {}

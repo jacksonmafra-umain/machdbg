@@ -43,6 +43,33 @@ namespace
 #endif
     }
 
+    // What the engine reported, in order, including the text of any internal error. A breakpoint
+    // that does not fire again is diagnosed from this and almost nothing else.
+    std::string timelineOf(const RecordingDebugger& debugger)
+    {
+        std::string out;
+        for(const MachBug::test::Event& event : debugger.events())
+        {
+            switch(event.type)
+            {
+            case EventType::CreateProcess: out += "CreateProcess "; break;
+            case EventType::ExitProcess:
+                out += "ExitProcess(code=" + std::to_string(event.exitCode) + ") ";
+                break;
+            case EventType::SystemBreakpoint: out += "SystemBreakpoint "; break;
+            case EventType::Resumed: out += "Resumed "; break;
+            case EventType::Step: out += "Step "; break;
+            case EventType::Breakpoint: out += "Breakpoint "; break;
+            case EventType::Exception:
+                out += "Exception(type=" + std::to_string(event.exceptionType) +
+                       ",code1=" + std::to_string(event.address) + ") ";
+                break;
+            case EventType::InternalError: out += "InternalError(" + event.message + ") "; break;
+            }
+        }
+        return out;
+    }
+
     // Launches known_function, reads the address it prints, and leaves the target stopped with
     // that address in hand. The capture technique is memory.cpp's: the fixture inherits fd 1 at
     // spawn time, so this process's stdout is redirected for Init() and restored immediately,
@@ -286,4 +313,90 @@ TEST_CASE("a software breakpoint's trap reaches the engine, and its program coun
     // task 3 needs, delivered by the only machine that can produce it.
     const uint64_t expectedFixup = kHostArch == DbgArch_Arm64 ? 0u : 1u;
     REQUIRE(pc == functionAddress + expectedFixup);
+}
+
+// Milestone 4 task 3: what happens when the target hits one. These are the tests the table alone
+// could not carry -- they are about the exception loop's classification and its resume cycle.
+TEST_CASE("a breakpoint hit is reported as a breakpoint, at the address it was set on")
+{
+    RecordingDebugger debugger;
+    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    REQUIRE(functionAddress != 0);
+
+    std::string error;
+    REQUIRE(debugger.BreakpointTable().Add(debugger.GetTaskPort(), kHostArch, functionAddress,
+                                           DbgBreakpointKind_Software, 0, &error));
+    debugger.Continue();
+    const bool hit = debugger.WaitFor(EventType::Breakpoint);
+
+    DbgRegisters regs{};
+    const bool readRegisters =
+        hit && MachBug::arch::Read(kHostArch, debugger.ResolveThread(0), &regs, &error);
+    const uint64_t pc = readRegisters ? programCounterOf(regs) : 0;
+
+    uint64_t reported = 0;
+    for(const MachBug::test::Event& event : debugger.events())
+    {
+        if(event.type == EventType::Breakpoint)
+            reported = event.address;
+    }
+
+    INFO("reported 0x" << std::hex << reported << ", pc 0x" << pc << ", expected 0x"
+         << functionAddress);
+    REQUIRE(hit);
+    REQUIRE(reported == functionAddress);
+
+    // The program counter is left on the breakpoint's own instruction, not one byte past it: a
+    // caller that resumes from here has to re-execute what the trap replaced, and on x86-64 that
+    // means the engine rewound it.
+    REQUIRE(readRegisters);
+    REQUIRE(pc == functionAddress);
+}
+
+TEST_CASE("continuing past a breakpoint runs the real instruction and keeps the breakpoint")
+{
+    RecordingDebugger debugger;
+    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    REQUIRE(functionAddress != 0);
+
+    std::string error;
+    REQUIRE(debugger.BreakpointTable().Add(debugger.GetTaskPort(), kHostArch, functionAddress,
+                                           DbgBreakpointKind_Software, 0, &error));
+    debugger.Continue();
+    REQUIRE(debugger.WaitFor(EventType::Breakpoint));
+
+    debugger.Continue();
+
+    // The fixture calls the patched function every 50ms, so a breakpoint that survived the resume
+    // fires again -- and one that was lost never does. WaitFor consumes up to its match, so this
+    // is the second hit rather than the first one seen twice.
+    const bool hitAgain = debugger.WaitFor(EventType::Breakpoint);
+    INFO("timeline: " << timelineOf(debugger));
+    REQUIRE(hitAgain);
+    REQUIRE(debugger.count(EventType::Breakpoint) >= 2);
+
+    // And the resume did not report itself as a step to the caller: the single-step the engine
+    // uses to get off the trap is machinery, not something the user asked for.
+    REQUIRE(debugger.count(EventType::Step) == 0);
+    REQUIRE(debugger.count(EventType::InternalError) == 0);
+}
+
+TEST_CASE("a disabled breakpoint stops nothing")
+{
+    RecordingDebugger debugger;
+    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    REQUIRE(functionAddress != 0);
+
+    std::string error;
+    REQUIRE(debugger.BreakpointTable().Add(debugger.GetTaskPort(), kHostArch, functionAddress,
+                                           DbgBreakpointKind_Software, 0, &error));
+    REQUIRE(debugger.BreakpointTable().SetEnabled(debugger.GetTaskPort(), kHostArch,
+                                                  functionAddress, false, &error));
+    debugger.Continue();
+
+    // A dwell rather than a wait: the assertion is that nothing arrives, and the fixture calls
+    // the function every 50ms, so half a second is ten chances to trap.
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    INFO("breakpoint events seen: " << debugger.count(EventType::Breakpoint));
+    REQUIRE(debugger.count(EventType::Breakpoint) == 0);
 }

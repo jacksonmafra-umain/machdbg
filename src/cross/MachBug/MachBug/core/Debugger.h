@@ -11,6 +11,7 @@
 
 #include <MachBug/types/MachBug.h>
 #include <MachBug/types/Global.h>
+#include <MachBug/core/Breakpoints.h>
 #include <MachBug/process/Process.h>
 
 namespace MachBug
@@ -171,6 +172,12 @@ namespace MachBug
         // or invented id resolves to MACH_PORT_NULL rather than reaching thread_get_state.
         mach_port_t ResolveThread(uint64_t threadId) const;
 
+        // The breakpoint table this engine is enforcing. Public because the C API layer drives it
+        // (SetBreakpoint/DeleteBreakpoint) and the exception loop consults it -- it is engine
+        // state rather than a private detail of the loop, and a caller holding a Debugger is
+        // already holding the thing that owns the target.
+        Breakpoints& BreakpointTable();
+
         // Internal: the MIG dispatch trampoline in ExceptionServer.cpp calls this, on the same
         // thread that is running exceptionLoop(), for every Mach exception message it decodes.
         // Not for any other caller -- there is exactly one legitimate caller
@@ -227,6 +234,12 @@ namespace MachBug
         // thread raised the trap that single-stepping itself causes, rather than a fresh,
         // unrelated exception).
         virtual void cbStep();
+
+        // Fired from the loop thread when the target stopped on a breakpoint this engine
+        // installed. `address` is the breakpoint's own address -- the one the caller asked for,
+        // after the architecture's program-counter fixup -- not the raw program counter the
+        // exception arrived with, which on x86-64 is one byte past it.
+        virtual void cbBreakpoint(uint64_t address);
 
         // Fired from the loop thread for any exception other than the first one and any
         // step-completion -- i.e. one this milestone has no more specific handling for yet.
@@ -293,6 +306,22 @@ namespace MachBug
         // Loop-thread only: distinguishes the very first exception (-> cbSystemBreakpoint) from
         // every later one (-> cbException), once mStepArmed has already been ruled out.
         bool mSeenFirstStop = false;
+
+        // The breakpoints this engine has installed in the target.
+        Breakpoints mBreakpoints;
+
+        // Loop-thread only. The breakpoint the target is currently stopped on, or 0: resuming
+        // from it needs the trap taken out first, and this is what remembers which one to put
+        // back afterwards.
+        uint64_t mStoppedAtBreakpoint = 0;
+
+        // Loop-thread only. True while the engine is single-stepping purely to get off a
+        // breakpoint's address. The step that follows is machinery rather than something the
+        // caller asked for, so its completion re-arms the trap and resumes without reporting --
+        // unless mStepWasRequested says the caller asked for a step as well, in which case the
+        // completion is theirs to hear about.
+        bool mSteppingOverBreakpoint = false;
+        bool mStepWasRequested = false;
 
         // Guards mPendingCommand; handleException() waits on mCmdCv for Continue()/StepInto()/
         // Stop() to post one. This -- and nothing else in this class -- is the thread-safety
