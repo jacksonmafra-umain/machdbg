@@ -79,6 +79,18 @@ if((CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86
 
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin") # macos
+	# Subdirectory: views
+	set(CMKR_CMAKE_FOLDER ${CMAKE_FOLDER})
+	if(CMAKE_FOLDER)
+		set(CMAKE_FOLDER "${CMAKE_FOLDER}/views")
+	else()
+		set(CMAKE_FOLDER views)
+	endif()
+	add_subdirectory(views)
+	set(CMAKE_FOLDER ${CMKR_CMAKE_FOLDER})
+
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin") # macos
 	# Subdirectory: MachBug/MachBug
 	set(CMKR_CMAKE_FOLDER ${CMAKE_FOLDER})
 	if(CMAKE_FOLDER)

@@ -1,0 +1,34 @@
+# Reference: https://build-cpp.github.io/cmkr/cmake-toml
+#
+# machdbg's own views, as opposed to the vendored x64dbg widget library in ../widgets. What lives
+# here is what the port needs and upstream has no equivalent of -- starting with a register view
+# that is driven by the engine's descriptor table rather than by a hardcoded x86 register enum
+# (see RegisterTable.h, and spec section 5).
+[cmake]
+version = "3.19"
+cmkr-include = false
+
+[project]
+name = "machdbg_views"
+languages = ["CXX"]
+
+# Split out of machdbg_views deliberately: this half has no Qt dependency, and the engine's test
+# binary links it to cover the formatting and descriptor-offset rules without pulling Qt into a
+# console test target.
+[target.machdbg_register_format]
+type = "static"
+sources = ["RegisterFormat.cpp"]
+headers = ["RegisterFormat.h"]
+compile-features = ["cxx_std_17"]
+include-directories = ["../", "../MachBug"]
+
+[target.machdbg_views]
+type = "static"
+sources = ["RegisterTable.cpp"]
+headers = ["RegisterTable.h"]
+compile-features = ["cxx_std_17"]
+include-directories = ["../", "../MachBug"]
+link-libraries = ["x64dbg::widgets", "machdbg_register_format"]
+cmake-after = """
+set_target_properties(machdbg_views PROPERTIES AUTOMOC ON)
+"""

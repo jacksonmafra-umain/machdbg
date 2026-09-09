@@ -349,6 +349,7 @@ set(MachBug_tests_SOURCES
 	exception_loop.cpp
 	memory.cpp
 	mig_exception_server.cpp
+	register_format.cpp
 	registers_arm64.cpp
 	registers_x86_64.cpp
 	targets_signed.cpp
@@ -371,12 +372,14 @@ target_compile_features(MachBug_tests PRIVATE
 
 target_include_directories(MachBug_tests PRIVATE
 	"../"
+	"../../"
 )
 
 target_link_libraries(MachBug_tests PRIVATE
 	MachBug
 	Catch2::Catch2WithMain
 	machbug_mig
+	machdbg_register_format
 )
 
 set_target_properties(MachBug_tests PROPERTIES
