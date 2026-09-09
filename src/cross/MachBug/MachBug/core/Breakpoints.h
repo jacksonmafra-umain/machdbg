@@ -55,6 +55,13 @@ namespace MachBug
         bool SetEnabled(mach_port_t task, DbgArch arch, uint64_t address, bool enabled,
                         std::string* error);
 
+        // Takes one breakpoint out of the target, or puts it back, without touching whether the
+        // user wants it. That distinction is the whole reason these exist next to SetEnabled: the
+        // resume cycle disarms a breakpoint to step off it and arms it again immediately, and a
+        // user watching the list must not see it blink to disabled and back.
+        bool Disarm(mach_port_t task, DbgArch arch, uint64_t address, std::string* error);
+        bool Arm(mach_port_t task, DbgArch arch, uint64_t address, std::string* error);
+
         // The entry at `address`, or nothing. The exception loop's question.
         std::optional<Entry> Find(uint64_t address) const;
 

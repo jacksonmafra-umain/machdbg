@@ -187,6 +187,40 @@ namespace MachBug
         return true;
     }
 
+    bool Breakpoints::Disarm(const mach_port_t task, const DbgArch arch, const uint64_t address,
+                             std::string* error)
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        const auto found = std::find_if(mEntries.begin(), mEntries.end(),
+            [address](const Entry& entry) { return entry.address == address; });
+        if(found == mEntries.end())
+        {
+            if(error)
+                *error = "no breakpoint at " + hex(address);
+            return false;
+        }
+        return disarmLocked(task, arch, *found, error);
+    }
+
+    bool Breakpoints::Arm(const mach_port_t task, const DbgArch arch, const uint64_t address,
+                          std::string* error)
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        const auto found = std::find_if(mEntries.begin(), mEntries.end(),
+            [address](const Entry& entry) { return entry.address == address; });
+        if(found == mEntries.end())
+        {
+            if(error)
+                *error = "no breakpoint at " + hex(address);
+            return false;
+        }
+        // A breakpoint the user disabled stays out of the target: the resume cycle re-arms what
+        // it took out, and it must not resurrect what someone switched off in between.
+        if(!found->enabled)
+            return true;
+        return armLocked(task, arch, *found, error);
+    }
+
     std::optional<Breakpoints::Entry> Breakpoints::Find(const uint64_t address) const
     {
         std::lock_guard<std::mutex> lock(mMutex);
