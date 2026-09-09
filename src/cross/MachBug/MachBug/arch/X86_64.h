@@ -26,4 +26,9 @@ namespace MachBug::arch::X86_64
     // Writes one register by the name the descriptor table publishes. Reads the whole state,
     // replaces one field and writes it back, because thread_set_state has no narrower unit.
     bool Write(mach_port_t thread, const char* name, uint64_t value, std::string* error);
+
+    // Arms or disarms hardware single-step for one thread. Two mechanisms, one entry (spec
+    // section 6): MDSCR_EL1 bit 0 on arm64, the TF bit in rflags on x86-64. Both are per-thread,
+    // like every other piece of debug state on this platform.
+    bool SetSingleStep(mach_port_t thread, bool enable, std::string* error);
 }

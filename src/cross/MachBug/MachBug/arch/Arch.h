@@ -24,4 +24,8 @@ namespace MachBug::arch
     bool Read(DbgArch arch, mach_port_t thread, DbgRegisters* out, std::string* error);
     bool Write(DbgArch arch, mach_port_t thread, const char* name, uint64_t value,
                std::string* error);
+
+    // Single-step, per thread, through whichever mechanism `arch` names. Same host restriction as
+    // Read/Write: only the architecture this build was made for can be armed.
+    bool SetSingleStep(DbgArch arch, mach_port_t thread, bool enable, std::string* error);
 }

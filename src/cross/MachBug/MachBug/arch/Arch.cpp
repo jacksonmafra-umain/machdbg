@@ -54,4 +54,20 @@ namespace MachBug::arch
             return false;
         }
     }
+
+    bool SetSingleStep(const DbgArch arch, const mach_port_t thread, const bool enable,
+                       std::string* error)
+    {
+        switch(arch)
+        {
+        case DbgArch_Arm64:
+            return Arm64::SetSingleStep(thread, enable, error);
+        case DbgArch_X86_64:
+            return X86_64::SetSingleStep(thread, enable, error);
+        default:
+            if(error)
+                *error = "no single-step mechanism for this architecture in this build";
+            return false;
+        }
+    }
 }

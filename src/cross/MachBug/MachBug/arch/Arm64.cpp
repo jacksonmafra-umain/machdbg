@@ -189,6 +189,49 @@ namespace MachBug::arch::Arm64
         return true;
     }
 
+    bool SetSingleStep(const mach_port_t thread, const bool enable, std::string* error)
+    {
+        if(thread == MACH_PORT_NULL)
+        {
+            if(error)
+                *error = "no thread to single-step: the target is not stopped, or the thread id "
+                         "names no thread of it";
+            return false;
+        }
+
+        // ARM_DEBUG_STATE64 is flavor 15, and the struct is bvr/bcr/wvr/wcr plus mdscr_el1. This
+        // function touches only the last of those, and reads the state before writing it back for
+        // that reason: hardware breakpoints and watchpoints live in the same state, so neither
+        // this nor they may clobber the other's registers by writing a zeroed struct.
+        arm_debug_state64_t state{};
+        mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
+        const kern_return_t got = thread_get_state(thread, ARM_DEBUG_STATE64,
+            reinterpret_cast<thread_state_t>(&state), &count);
+        if(got != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_get_state(ARM_DEBUG_STATE64) failed: ") +
+                         mach_error_string(got);
+            return false;
+        }
+
+        if(enable)
+            state.__mdscr_el1 |= 1ULL;   // MDSCR_EL1 bit 0: SS
+        else
+            state.__mdscr_el1 &= ~1ULL;
+
+        const kern_return_t set = thread_set_state(thread, ARM_DEBUG_STATE64,
+            reinterpret_cast<thread_state_t>(&state), ARM_DEBUG_STATE64_COUNT);
+        if(set != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_set_state(ARM_DEBUG_STATE64) failed: ") +
+                         mach_error_string(set);
+            return false;
+        }
+        return true;
+    }
+
 #else
 
     // Not "unimplemented": there is no arm64 thread state to read on x86-64 hardware.
@@ -205,6 +248,13 @@ namespace MachBug::arch::Arm64
     {
         if(error)
             *error = "this build cannot write arm64 thread state: it is not an arm64 build";
+        return false;
+    }
+
+    bool SetSingleStep(mach_port_t, bool, std::string* error)
+    {
+        if(error)
+            *error = "this build cannot single-step arm64 threads: it is not an arm64 build";
         return false;
     }
 

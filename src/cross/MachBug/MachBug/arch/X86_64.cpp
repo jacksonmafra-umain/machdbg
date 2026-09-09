@@ -209,6 +209,49 @@ namespace MachBug::arch::X86_64
         return true;
     }
 
+    bool SetSingleStep(const mach_port_t thread, const bool enable, std::string* error)
+    {
+        if(thread == MACH_PORT_NULL)
+        {
+            if(error)
+                *error = "no thread to single-step: the target is not stopped, or the thread id "
+                         "names no thread of it";
+            return false;
+        }
+
+        // The trap flag lives in rflags, which is part of the *thread* state rather than the debug
+        // state -- unlike arm64, where single-step is a debug-state bit. That asymmetry is why
+        // this is an arch entry at all instead of one shared implementation.
+        x86_thread_state64_t state{};
+        mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
+        const kern_return_t got = thread_get_state(thread, x86_THREAD_STATE64,
+            reinterpret_cast<thread_state_t>(&state), &count);
+        if(got != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_get_state(x86_THREAD_STATE64) failed: ") +
+                         mach_error_string(got);
+            return false;
+        }
+
+        constexpr uint64_t kEflagsTrapFlag = 0x100;
+        if(enable)
+            state.__rflags |= kEflagsTrapFlag;
+        else
+            state.__rflags &= ~kEflagsTrapFlag;
+
+        const kern_return_t set = thread_set_state(thread, x86_THREAD_STATE64,
+            reinterpret_cast<thread_state_t>(&state), x86_THREAD_STATE64_COUNT);
+        if(set != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_set_state(x86_THREAD_STATE64) failed: ") +
+                         mach_error_string(set);
+            return false;
+        }
+        return true;
+    }
+
 #else
 
     // Not "unimplemented": there is no such thing as reading an x86-64 thread state on arm64
@@ -226,6 +269,13 @@ namespace MachBug::arch::X86_64
     {
         if(error)
             *error = "this build cannot write x86-64 thread state: it is not an x86-64 build";
+        return false;
+    }
+
+    bool SetSingleStep(mach_port_t, bool, std::string* error)
+    {
+        if(error)
+            *error = "this build cannot single-step x86-64 threads: it is not an x86-64 build";
         return false;
     }
 
