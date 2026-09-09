@@ -65,8 +65,45 @@ namespace MachBug
         // child is killed rather than leaked.
         bool Init(const char* szFilePath, const char* const* argv = nullptr);
 
+        // Attaches to a process that is already running, rather than launching one -- Task 6's
+        // addition to Init()'s launch path. Reaches for ptrace(PT_ATTACHEXC), the same call
+        // Start() makes for a launched child (see Debugger.Loop.cpp), not PT_ATTACH: the EXC
+        // variant is what makes the kernel route every signal pid would otherwise receive
+        // through a Mach exception port once one exists, which is the entire model this engine
+        // is built on -- PT_ATTACH would attach pid to ordinary signal-based tracing this
+        // engine's exception loop has no way to observe at all.
+        //
+        // Unlike Init()'s POSIX_SPAWN_START_SUSPENDED, PT_ATTACHEXC's own attach does not
+        // synchronously stop pid: per ptrace(2), it sends SIGSTOP and leaves the caller to
+        // waitpid() for it, which this call does before returning -- that waitpid() is also what
+        // completes PT_ATTACHEXC's reparent of pid to this process for tracing purposes, the
+        // reason a later waitpid() (Start()'s exceptionLoop(), in Debugger.Loop.cpp) can wait on
+        // a pid this process did not itself spawn. Only once that stop is confirmed does this
+        // call take the task port, for the same reason Init() waits for the suspended-at-exec
+        // window before doing so: task_set_exception_ports must be installed (by Start(), next)
+        // before anything can run and race the debugger.
+        //
+        // On a task_for_pid denial, unlike Init()'s equivalent failure, pid is not killed: it did
+        // not come from this engine, and a caller reaching for Attach() does not get to have
+        // someone else's process killed just because this engine failed to finish taking control
+        // of it. It is instead detached and left running, resumed exactly as if Attach() had
+        // never been called.
+        //
+        // Returns false, leaving GetPid()/GetTaskPort() at 0/MACH_PORT_NULL, if pid is not
+        // positive, cannot be attached to, exits before the attach completes, or denies
+        // task_for_pid. See LastTaskForPidResult() for distinguishing that last case from the
+        // others.
+        bool Attach(pid_t pid);
+
         pid_t GetPid() const;
         mach_port_t GetTaskPort() const;
+
+        // The kern_return_t from the most recent task_for_pid call this object made, via Init()
+        // or Attach(), or KERN_SUCCESS if neither has been called yet. Exists so the C API layer
+        // (machbug_api.cpp) can distinguish a denied task_for_pid -- machbug_api.h documents
+        // DbgStatus_NotPermitted specifically for this -- from any other launch/attach failure,
+        // rather than collapsing every failure into one generic status.
+        kern_return_t LastTaskForPidResult() const;
 
         // Kills a child that Init() launched but that was never resumed, or that Start()'s loop
         // is no longer tracking (Start() already returned). Returns false if there is no
@@ -189,6 +226,18 @@ namespace MachBug
         };
 
         std::unique_ptr<Process> mProcess;
+
+        // True once Attach() has already ptrace(PT_ATTACHEXC)'d mProcess->pid, so Start() knows
+        // to skip its own call of the same -- ptrace(2) does not allow attaching to an
+        // already-attached pid a second time (EBUSY), and there is nothing useful a second call
+        // would add: Attach() already established the one relationship Start() needs (pid marked
+        // as a Mach-exception tracee of this process). Init()'s launch path leaves this false;
+        // Start() still needs to make that call itself there, since launching never establishes
+        // the ptrace relationship on its own. Reset on Terminate() along with mProcess.
+        bool mAttachedViaPtrace = false;
+
+        // See LastTaskForPidResult()'s comment.
+        kern_return_t mLastTaskForPidResult = KERN_SUCCESS;
 
         mach_port_t mExceptionPort = MACH_PORT_NULL;
 

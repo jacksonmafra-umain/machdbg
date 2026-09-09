@@ -28,6 +28,7 @@ set(CMKR_TARGET MachBug)
 include("../cmake/MachBugMig.cmake")
 
 set(MachBug_SOURCES
+	"api/machbug_api.cpp"
 	"api/machbug_api.h"
 	cmake.toml
 	"core/Debugger.Loop.cpp"

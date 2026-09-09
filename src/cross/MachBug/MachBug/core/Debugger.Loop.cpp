@@ -195,7 +195,13 @@ namespace MachBug
         // actually take effect and the child run for the first time. Must happen before the
         // task_set_exception_ports() call below has any chance to matter, and while the child is
         // still suspended -- same reasoning as installing the exception ports themselves early.
-        if(ptrace(PT_ATTACHEXC, mProcess->pid, nullptr, 0) != 0)
+        //
+        // Skipped when Attach() (Debugger.cpp) already made this exact call: ptrace(2) does not
+        // allow attaching to an already-attached pid a second time (EBUSY), and there is nothing
+        // this second call would add -- Attach() already put mProcess->pid in the state this one
+        // exists to reach (a Mach-exception tracee of this process), by the same call, before
+        // ever returning to its own caller.
+        if(!mAttachedViaPtrace && ptrace(PT_ATTACHEXC, mProcess->pid, nullptr, 0) != 0)
         {
             cbInternalError("ptrace(PT_ATTACHEXC) failed for pid " +
                              std::to_string(mProcess->pid) + ": " + std::string(strerror(errno)));
@@ -261,6 +267,13 @@ namespace MachBug
         // for real: SIGCONT is what actually undoes POSIX_SPAWN_START_SUSPENDED, not
         // task_resume() (there is no extra task-level suspension from posix_spawn to undo here;
         // Pause()'s task_suspend()/task_resume() pairing below is a separate, later mechanism).
+        //
+        // The same call does the equivalent job on the attach path (Debugger::Attach()): its own
+        // PT_ATTACHEXC also stops the target via an actual SIGSTOP (ptrace(2)), which this SIGCONT
+        // undoes exactly as it does POSIX_SPAWN_START_SUSPENDED's -- and since Attach() already
+        // made pid a Mach-exception tracee of this process before this point, the kernel routes
+        // this SIGCONT through mExceptionPort just installed above, the same way it does for a
+        // launched child. Task 6 introduced Attach(); this call needed no change for it to work.
         if(kill(mProcess->pid, SIGCONT) != 0)
         {
             cbInternalError("SIGCONT failed to resume the suspended child: " +

@@ -37,6 +37,7 @@ required=(
     src/dbg/_plugins.h
     cmake/cmkr.cmake
     src/cross/MachBug/MachBug/api/machbug_api.h
+    src/cross/MachBug/MachBug/api/machbug_api.cpp
     src/cross/MachBug/tests/CMakeLists.txt
     src/cross/MachBug/tests/api_contract.cpp
     src/cross/MachBug/tests/api_contract_c.c
