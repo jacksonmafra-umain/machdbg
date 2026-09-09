@@ -41,11 +41,22 @@ jobs:
         working-directory: src/cross
         run: cmake --build build/macos-arm64 --target hex_viewer minidump remote_table release_notes
 
-      - name: Build and run the contract tests
+      - name: Build the contract tests
         working-directory: src/cross
-        run: |
-          cmake --build build/macos-arm64 --target MachBug_tests
-          ./build/macos-arm64/tests/MachBug_tests
+        run: cmake --build build/macos-arm64 --target MachBug_tests
+
+      # Bounded separately from the build above, and tightly: a normal run finishes in
+      # seconds. Milestone 2 task 6 found (and fixed) one real blocking-wait bug that could
+      # hang the whole process indefinitely at near-zero CPU -- an uninterruptible kernel
+      # wait, not a spin -- and it exits 0 whether it stalls for a second first or fifteen
+      # minutes. This timeout is the safety net for that entire class of bug, independent of
+      # which wait turns out to be the cause: a stall here now fails this step loudly within
+      # minutes, at this named location, instead of silently costing fifteen minutes of CI
+      # time before passing anyway.
+      - name: Run the contract tests
+        working-directory: src/cross
+        timeout-minutes: 3
+        run: ./build/macos-arm64/tests/MachBug_tests
 
       - name: Verify the bundles
         run: ./scripts/check-bundles.sh
