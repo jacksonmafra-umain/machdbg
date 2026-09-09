@@ -31,12 +31,16 @@ namespace MachBug::test
     // it here means Task 4's call sites (`REQUIRE(debugger.WaitFor(...))`) need no change beyond
     // the type name.
     //
-    // The EventType set below is a SUBSET of ElfBug's, not a superset, and deliberately so.
-    // MachBug::Debugger (core/Debugger.h) currently exposes exactly six overridable callbacks:
-    // cbInternalError, cbCreateProcessEvent, cbExitProcessEvent, cbSystemBreakpoint, cbStep, and
-    // cbException -- every one of which already has a same-named counterpart in ElfBug's
-    // EventType (CreateProcess, ExitProcess, SystemBreakpoint, Step, Exception, InternalError).
-    // There is nothing MachBug's engine can report today that ElfBug's harness has no slot for.
+    // The EventType set below is almost a SUBSET of ElfBug's, and deliberately so. MachBug::
+    // Debugger (core/Debugger.h) exposes seven overridable callbacks: cbInternalError,
+    // cbCreateProcessEvent, cbExitProcessEvent, cbSystemBreakpoint, cbStep, cbException, and
+    // cbResumed -- all but the last already have a same-named counterpart in ElfBug's EventType
+    // (CreateProcess, ExitProcess, SystemBreakpoint, Step, Exception, InternalError). Resumed is
+    // the one MachBug-only slot, and it exists because MachBug's stopped state is an unanswered
+    // exception reply rather than a kernel-level stop: only the engine knows when that reply has
+    // gone out, so only the engine can tell a test the target is running again (see cbResumed()
+    // in Debugger.h). ElfBug needs no equivalent -- a tracee resumes when ptrace(PTRACE_CONT)
+    // returns, on the caller's own thread.
     // What ElfBug has and this file does not add -- CreateThread, ExitThread, Breakpoint, Paused
     // -- all name capabilities (multi-threaded tracking, breakpoint dispatch, an explicit "now
     // paused" notification) that milestone 2's Debugger does not implement yet, not events this
@@ -59,6 +63,7 @@ namespace MachBug::test
         CreateProcess,
         ExitProcess,
         SystemBreakpoint,
+        Resumed,
         Step,
         Exception,
         InternalError,
@@ -249,6 +254,11 @@ namespace MachBug::test
         void cbSystemBreakpoint() override
         {
             push({EventType::SystemBreakpoint, {}, 0, 0, 0, 0, {}});
+        }
+
+        void cbResumed() override
+        {
+            push({EventType::Resumed, {}, 0, 0, 0, 0, {}});
         }
 
         void cbStep() override

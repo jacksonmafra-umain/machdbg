@@ -287,10 +287,12 @@ TEST_CASE("Stop() kills a genuinely running target instead of hanging on its own
     const pid_t pid = debugger.GetPid();
     debugger.Continue();
 
-    // No event to wait on for "now running freely, for real" -- give it a moment to actually
-    // resume and start spinning in run_endlessly's for(;;) sleep(1) loop, so Stop() below is
-    // exercised against a live, running target and not one still mid-resume.
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    // Waits for the reply that answers the first stop to have actually gone out -- that send is
+    // what resumes the target thread (Debugger.h's class comment), so past this point Stop()
+    // below is exercised against a live, running target and not one still mid-resume. This used
+    // to be a sleep_for(300ms), which asserted nothing and would have passed just as happily
+    // against a target that never resumed at all.
+    REQUIRE(debugger.WaitFor(EventType::Resumed));
 
     debugger.Stop();
 
