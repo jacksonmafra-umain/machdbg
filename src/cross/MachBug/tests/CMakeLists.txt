@@ -381,6 +381,7 @@ set(MachBug_tests_SOURCES
 	TestHarness.h
 	api_contract.cpp
 	api_contract_c.c
+	breakpoints_hardware.cpp
 	breakpoints_software.cpp
 	cmake.toml
 	debugger_launch.cpp

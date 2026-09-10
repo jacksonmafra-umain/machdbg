@@ -77,6 +77,7 @@ required=(
     src/cross/MachBug/MachBug/core/Threads.h
     src/cross/MachBug/MachBug/core/Threads.cpp
     src/cross/MachBug/tests/threads.cpp
+    src/cross/MachBug/tests/breakpoints_hardware.cpp
     src/cross/views/cmake.toml
     src/cross/views/CMakeLists.txt
     src/cross/views/RegisterFormat.h
