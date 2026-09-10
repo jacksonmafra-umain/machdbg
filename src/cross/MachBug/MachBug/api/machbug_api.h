@@ -192,6 +192,14 @@ typedef struct DbgEngine
 
     DbgStatus (*SetBreakpoint)(void* impl, DbgBreakpointKind kind, uint64_t addr, uint32_t size);
     DbgStatus (*DeleteBreakpoint)(void* impl, uint64_t addr);
+
+    /* Takes a breakpoint out of the target, or puts it back, without forgetting it. Distinct
+       from DeleteBreakpoint on purpose: a user unticking a checkbox still wants the row, the
+       address and the kind to survive, and delete-then-add-again is not the same operation --
+       it loses the entry if the second call fails, and a hardware one may come back in a
+       different slot. Disabled means the target is no longer carrying it, which is what
+       IsBreakpointEffective then reports. */
+    DbgStatus (*SetBreakpointEnabled)(void* impl, uint64_t addr, bool enabled);
     bool (*IsBreakpointEffective)(void* impl, uint64_t addr);
     uint32_t (*GetHwBreakpointSlots)(void* impl);
 } DbgEngine;

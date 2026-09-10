@@ -198,6 +198,8 @@ TEST_CASE("every vtable entry is callable and answers honestly about itself")
     REQUIRE(vtStatus(engine->SetBreakpoint(engine->impl, DbgBreakpointKind_Software, 0, 1)) ==
             DbgStatus_NotAttached);
     REQUIRE(vtStatus(engine->DeleteBreakpoint(engine->impl, 0)) == DbgStatus_NotAttached);
+    REQUIRE(vtStatus(engine->SetBreakpointEnabled(engine->impl, 0, false)) ==
+            DbgStatus_NotAttached);
     REQUIRE_FALSE(engine->IsBreakpointEffective(engine->impl, 0));
 
     // The slot count answers with no target at all: it describes the machine, not the process,
@@ -820,6 +822,18 @@ TEST_CASE("a breakpoint set through the vtable stops the target and reports its 
     const int hits = harness.hits.load(std::memory_order_acquire);
     const uint64_t reported = harness.lastAddress.load(std::memory_order_acquire);
 
+    // Disabled means the target stops carrying it while the caller keeps the breakpoint. The
+    // round trip is what separates this entry from delete-and-set-again, which would be a
+    // different breakpoint that happened to share an address.
+    const DbgStatus disableResult =
+        engine->SetBreakpointEnabled(engine->impl, functionAddress, false);
+    const bool effectiveWhileDisabled =
+        engine->IsBreakpointEffective(engine->impl, functionAddress);
+    const DbgStatus enableResult =
+        engine->SetBreakpointEnabled(engine->impl, functionAddress, true);
+    const bool effectiveAfterEnable =
+        engine->IsBreakpointEffective(engine->impl, functionAddress);
+
     const DbgStatus deleteResult = engine->DeleteBreakpoint(engine->impl, functionAddress);
     const bool effectiveAfterDelete = engine->IsBreakpointEffective(engine->impl, functionAddress);
     const DbgStatus deleteAgain = engine->DeleteBreakpoint(engine->impl, functionAddress);
@@ -840,6 +854,11 @@ TEST_CASE("a breakpoint set through the vtable stops the target and reports its 
     REQUIRE(effectiveAfterSet);
     REQUIRE(hits >= 1);
     REQUIRE(reported == functionAddress);
+
+    REQUIRE(disableResult == DbgStatus_Ok);
+    REQUIRE_FALSE(effectiveWhileDisabled);
+    REQUIRE(enableResult == DbgStatus_Ok);
+    REQUIRE(effectiveAfterEnable);
 
     REQUIRE(deleteResult == DbgStatus_Ok);
     // Effective means the target is carrying it, so a deleted breakpoint is not effective and a
