@@ -5,6 +5,7 @@
 #include <string>
 
 #include <MachBug/api/machbug_api.h>
+#include <MachBug/arch/Arch.h>
 
 // The arm64 half of the register contract: one thread-state flavor (ARM_THREAD_STATE64, flavor
 // 6, count 68), one mapping into DbgRegsArm64, one descriptor table. Nothing above the C API
@@ -53,4 +54,15 @@ namespace MachBug::arch::Arm64
     // Removes an arm64e pointer-authentication signature from a code address. See the comment on
     // the implementation for what was measured about when a signature is actually present.
     uint64_t StripPointerAuth(uint64_t address);
+
+    // How many of arm_debug_state64_t's sixteen slots this machine implements, from
+    // `hw.optional.breakpoint`/`hw.optional.watchpoint`. Six and four on the Apple Silicon
+    // machines this was measured on; the arrays are sixteen wide regardless, and that width is
+    // not an answer to this question.
+    DebugSlotCounts SlotCounts();
+
+    // Writes the execution slots into one thread's BVR/BCR pairs, clearing the slots `slots`
+    // does not describe. MDSCR_EL1 and the watchpoint registers are read and written back
+    // untouched: single-step shares this state, and a step armed elsewhere must survive.
+    bool ApplyDebugState(mach_port_t thread, const DebugSlots& slots, std::string* error);
 }

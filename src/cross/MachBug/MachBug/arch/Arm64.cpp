@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <sys/sysctl.h>
 
 // arm_thread_state64_t exists only in a build *for* arm64: mach/arm/thread_status.h guards its
 // contents behind __arm__ || __arm64__. The descriptor table below is built from DbgRegsArm64's
@@ -266,6 +267,77 @@ namespace MachBug::arch::Arm64
         return true;
     }
 
+
+    DebugSlotCounts SlotCounts()
+    {
+        // MEASURED on this machine: hw.optional.breakpoint is 6 and hw.optional.watchpoint is 4,
+        // while arm_debug_state64_t's arrays are sixteen wide. The sysctl is the only one of the
+        // two numbers that describes silicon.
+        const auto ask = [](const char* name, const uint32_t fallback) -> uint32_t {
+            uint32_t value = 0;
+            std::size_t size = sizeof(value);
+            if(sysctlbyname(name, &value, &size, nullptr, 0) != 0 || value == 0)
+                return fallback;
+            return value;
+        };
+
+        // The fallbacks are ARMv8's architectural minimum (two of each), not this machine's six
+        // and four: if the sysctl ever stops answering, undercounting refuses breakpoints the
+        // machine could have honoured, and overcounting writes registers it does not have. Only
+        // one of those two mistakes is recoverable by the user.
+        return {ask("hw.optional.breakpoint", 2), ask("hw.optional.watchpoint", 2)};
+    }
+
+    bool ApplyDebugState(const mach_port_t thread, const DebugSlots& slots, std::string* error)
+    {
+        if(thread == MACH_PORT_NULL)
+        {
+            if(error)
+                *error = "no thread to write debug registers to";
+            return false;
+        }
+
+        // Read first, for the same reason SetSingleStep does: MDSCR_EL1 and the watchpoint
+        // registers live in this state, and writing a zeroed struct would disarm a step or a
+        // watchpoint that has nothing to do with the slots being applied.
+        arm_debug_state64_t state{};
+        mach_msg_type_number_t count = ARM_DEBUG_STATE64_COUNT;
+        const kern_return_t got = thread_get_state(thread, ARM_DEBUG_STATE64,
+            reinterpret_cast<thread_state_t>(&state), &count);
+        if(got != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_get_state(ARM_DEBUG_STATE64) failed: ") +
+                         mach_error_string(got);
+            return false;
+        }
+
+        // BCR for an unlinked instruction-address match in user code: E (bit 0), PMC = 0b10
+        // (bits 2:1, EL0), BAS = 0b1111 (bits 8:5, all four bytes of the instruction), BT = 0
+        // (bits 23:20). Spelled out rather than named from a header because the SDK publishes no
+        // constants for these fields.
+        constexpr uint32_t kBcrEnabledForUserCode = 1u | (2u << 1) | (0xFu << 5);
+
+        const uint32_t implemented = SlotCounts().exec;
+        for(uint32_t slot = 0; slot < implemented; ++slot)
+        {
+            const uint64_t address = slot < slots.exec.size() ? slots.exec[slot] : 0;
+            state.__bvr[slot] = address;
+            state.__bcr[slot] = address != 0 ? kBcrEnabledForUserCode : 0;
+        }
+
+        const kern_return_t set = thread_set_state(thread, ARM_DEBUG_STATE64,
+            reinterpret_cast<thread_state_t>(&state), ARM_DEBUG_STATE64_COUNT);
+        if(set != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_set_state(ARM_DEBUG_STATE64) failed: ") +
+                         mach_error_string(set);
+            return false;
+        }
+        return true;
+    }
+
 #else
 
     // Not "unimplemented": there is no arm64 thread state to read on x86-64 hardware.
@@ -289,6 +361,21 @@ namespace MachBug::arch::Arm64
     {
         if(error)
             *error = "this build cannot single-step arm64 threads: it is not an arm64 build";
+        return false;
+    }
+
+    DebugSlotCounts SlotCounts()
+    {
+        // The sysctl this reads on an arm64 host describes the host's own CPU, so asking it here
+        // would answer with an Intel machine's debug registers under an arm64 label. No slots is
+        // the truthful answer: there are no arm64 debug registers on this machine to allocate.
+        return {0, 0};
+    }
+
+    bool ApplyDebugState(mach_port_t, const DebugSlots&, std::string* error)
+    {
+        if(error)
+            *error = "this build cannot write arm64 debug registers: it is not an arm64 build";
         return false;
     }
 

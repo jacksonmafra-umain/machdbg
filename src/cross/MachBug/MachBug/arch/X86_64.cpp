@@ -286,6 +286,72 @@ namespace MachBug::arch::X86_64
         return true;
     }
 
+
+    DebugSlotCounts SlotCounts()
+    {
+        // Four debug address registers, DR0-DR3, fixed by the architecture rather than something
+        // to ask the machine about. Both numbers are the same four registers rather than four of
+        // each: execution breakpoints and watchpoints share the pool here, unlike arm64 where
+        // BVR and WVR are separate files.
+        return {4, 4};
+    }
+
+    bool ApplyDebugState(const mach_port_t thread, const DebugSlots& slots, std::string* error)
+    {
+        if(thread == MACH_PORT_NULL)
+        {
+            if(error)
+                *error = "no thread to write debug registers to";
+            return false;
+        }
+
+        // Read first: DR7 carries the enable and type fields of every slot, including ones these
+        // slots do not describe, and writing a zeroed register would disarm them.
+        x86_debug_state64_t state{};
+        mach_msg_type_number_t count = x86_DEBUG_STATE64_COUNT;
+        const kern_return_t got = thread_get_state(thread, x86_DEBUG_STATE64,
+            reinterpret_cast<thread_state_t>(&state), &count);
+        if(got != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_get_state(x86_DEBUG_STATE64) failed: ") +
+                         mach_error_string(got);
+            return false;
+        }
+
+        uint64_t* const addressRegisters[4] = {&state.__dr0, &state.__dr1, &state.__dr2,
+                                               &state.__dr3};
+        for(uint32_t slot = 0; slot < 4; ++slot)
+        {
+            const uint64_t address = slot < slots.exec.size() ? slots.exec[slot] : 0;
+            *addressRegisters[slot] = address;
+
+            // DR7 holds two fields per slot: a local-enable bit at 2*slot, and a four-bit
+            // read/write-and-length field at 16 + 4*slot. Zeroes in that field mean "break on
+            // instruction execution, one byte", which is why clearing it is also what configures
+            // it and why an execution breakpoint needs no length.
+            const uint64_t localEnable = 1ull << (2 * slot);
+            const uint64_t typeAndLength = 0xFull << (16 + 4 * slot);
+            state.__dr7 &= ~(localEnable | typeAndLength);
+            if(address != 0)
+                state.__dr7 |= localEnable;
+        }
+
+        // DR6 records which slot fired, and is left as the kernel presents it: nothing here
+        // reads it -- the dispatch matches on the address the exception carries -- and clearing
+        // a bit the kernel has already consumed would be guessing at its bookkeeping.
+        const kern_return_t set = thread_set_state(thread, x86_DEBUG_STATE64,
+            reinterpret_cast<thread_state_t>(&state), x86_DEBUG_STATE64_COUNT);
+        if(set != KERN_SUCCESS)
+        {
+            if(error)
+                *error = std::string("thread_set_state(x86_DEBUG_STATE64) failed: ") +
+                         mach_error_string(set);
+            return false;
+        }
+        return true;
+    }
+
 #else
 
     // Not "unimplemented": there is no such thing as reading an x86-64 thread state on arm64
@@ -310,6 +376,20 @@ namespace MachBug::arch::X86_64
     {
         if(error)
             *error = "this build cannot single-step x86-64 threads: it is not an x86-64 build";
+        return false;
+    }
+
+    DebugSlotCounts SlotCounts()
+    {
+        // No x86-64 debug registers on this machine to allocate. Answering with the
+        // architectural four would let a caller allocate slots that cannot be written.
+        return {0, 0};
+    }
+
+    bool ApplyDebugState(mach_port_t, const DebugSlots&, std::string* error)
+    {
+        if(error)
+            *error = "this build cannot write x86-64 debug registers: it is not an x86-64 build";
         return false;
     }
 
