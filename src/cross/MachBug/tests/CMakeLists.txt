@@ -304,6 +304,43 @@ add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
     COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
 )
 
+# Target: machbug_fixture_writes_a_global
+set(machbug_fixture_writes_a_global_SOURCES
+	cmake.toml
+	"targets/writes_a_global.cpp"
+)
+
+add_executable(machbug_fixture_writes_a_global)
+
+target_sources(machbug_fixture_writes_a_global PRIVATE ${machbug_fixture_writes_a_global_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${machbug_fixture_writes_a_global_SOURCES})
+
+target_compile_options(machbug_fixture_writes_a_global PRIVATE
+	-g
+	-O0
+)
+
+set_target_properties(machbug_fixture_writes_a_global PROPERTIES
+	OUTPUT_NAME
+		writes_a_global
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT machbug_fixture_writes_a_global)
+endif()
+
+set(CMKR_TARGET machbug_fixture_writes_a_global)
+set_target_properties(${CMKR_TARGET} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/targets"
+)
+add_custom_command(TARGET ${CMKR_TARGET} POST_BUILD
+    COMMAND codesign --force --sign - --entitlements
+            "${CMAKE_CURRENT_SOURCE_DIR}/targets.entitlements"
+            "$<TARGET_FILE:${CMKR_TARGET}>"
+    COMMENT "Signing ${CMKR_TARGET} with get-task-allow"
+)
+
 # Target: machbug_fixture_crash_bad_access
 set(machbug_fixture_crash_bad_access_SOURCES
 	cmake.toml
@@ -396,6 +433,7 @@ set(MachBug_tests_SOURCES
 	test_harness.cpp
 	thread_resolution.cpp
 	threads.cpp
+	watchpoints.cpp
 )
 
 add_executable(MachBug_tests)
@@ -448,6 +486,7 @@ add_dependencies(MachBug_tests
     machbug_fixture_known_globals
     machbug_fixture_known_function
     machbug_fixture_multi_threaded
+    machbug_fixture_writes_a_global
     machbug_fixture_crash_bad_access
     machbug_fixture_no_get_task_allow
 )
