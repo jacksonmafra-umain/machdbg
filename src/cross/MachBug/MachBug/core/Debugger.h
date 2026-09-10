@@ -183,6 +183,12 @@ namespace MachBug
         // when it stops the target, because that is the only moment it can act on what it sees.
         std::size_t ThreadCount() const;
 
+        // Where the exception loop is in its shutdown, as words. Exists for one purpose: when a
+        // caller's bounded wait for Start() to return runs out, the interesting question is
+        // which stage it is stuck in, and a bound that fires without saying that only reports
+        // that it fired again (issue #107).
+        const char* TeardownStageName() const;
+
         // Internal: the MIG dispatch trampoline in ExceptionServer.cpp calls this, on the same
         // thread that is running exceptionLoop(), for every Mach exception message it decodes.
         // Not for any other caller -- there is exactly one legitimate caller
@@ -296,6 +302,18 @@ namespace MachBug
         kern_return_t mLastTaskForPidResult = KERN_SUCCESS;
 
         mach_port_t mExceptionPort = MACH_PORT_NULL;
+
+        enum class TeardownStage
+        {
+            Running,
+            RestoringBreakpoints,
+            Detaching,
+            Finished,
+        };
+
+        // Loop-thread writes, any-thread reads -- the reader is a caller whose wait for the loop
+        // has just run out.
+        std::atomic<TeardownStage> mTeardownStage{TeardownStage::Running};
 
         std::atomic<bool> mIsRunning{false};
         std::atomic<bool> mStopRequested{false};

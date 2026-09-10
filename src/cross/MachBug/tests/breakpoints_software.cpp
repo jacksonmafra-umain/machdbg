@@ -343,3 +343,32 @@ TEST_CASE("a disabled breakpoint stops nothing")
     INFO("breakpoint events seen: " << debugger.count(EventType::Breakpoint));
     REQUIRE(debugger.count(EventType::Breakpoint) == 0);
 }
+
+TEST_CASE("stopping while parked on a breakpoint brings the loop down promptly")
+{
+    RecordingDebugger debugger;
+    const uint64_t functionAddress =
+        MachBug::test::LaunchAndReadPublishedAddress(debugger, FIXTURE("known_function"));
+    REQUIRE(functionAddress != 0);
+
+    std::string error;
+    REQUIRE(debugger.BreakpointTable().Add(debugger.GetTaskPort(), kHostArch, functionAddress,
+                                           DbgBreakpointKind_Software, 0, &error));
+    debugger.Continue();
+    REQUIRE(debugger.WaitFor(EventType::Breakpoint));
+
+    // A bound, not a reproduction: the teardown this guards has never been slow on a developer
+    // machine, only on CI, and a test that cannot fail locally is still worth having when the
+    // thing it bounds is what takes the whole suite down with it (issue #107). Five seconds is
+    // generous for a teardown that normally takes milliseconds and well under the harness's own
+    // fifteen, so this fails as one test rather than as an abort.
+    const auto start = std::chrono::steady_clock::now();
+    debugger.Stop();
+    const bool finished = debugger.WaitForLoopToFinish(std::chrono::seconds(5));
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start);
+
+    INFO("teardown took " << elapsed.count() << "ms; the loop reports it is "
+         << debugger.TeardownStageName());
+    REQUIRE(finished);
+}
