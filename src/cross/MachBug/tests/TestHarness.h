@@ -138,13 +138,15 @@ namespace MachBug::test
             {
                 std::fprintf(stderr,
                     "\nRecordingDebugger: Stop() did not bring the exception loop down within the "
-                    "timeout.\nThe loop thread is still running and still touching state "
+                    "timeout; the loop reports it is %s.", TeardownStageName());
+                std::fprintf(stderr,
+                    "\n\nThe loop thread is still running and still touching state "
                     "~Debugger() is about to\ndestroy (Terminate() -> mProcess.reset() -> "
                     "~Process() -> mach_port_deallocate);\ncontinuing would be a use-after-free "
                     "race, not a harmless leak, so this process is\naborting instead of letting "
-                    "that happen. This means Stop() itself has regressed --\nlook at "
-                    "Debugger::Stop()/exceptionLoop()'s teardown, not at whatever test happens\n"
-                    "to run (or crash) next.\n\n");
+                    "that happen. Something in Stop()/exceptionLoop()'s teardown is not "
+                    "finishing --\nthe stage named above says which part, so look there rather "
+                    "than at whatever test\nhappens to run (or crash) next.\n\n");
                 std::fflush(stderr);
                 std::abort();
             }

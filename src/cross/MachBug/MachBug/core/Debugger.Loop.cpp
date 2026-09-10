@@ -405,6 +405,11 @@ namespace MachBug
             // target still carrying a trap runs into it with no debugger listening and dies of a
             // SIGTRAP nobody asked for -- and until this was here, Stop() itself hung: the loop
             // was already gone, so that trap's exception had no one left to answer it.
+            //
+            // Usually a no-op since #107: a Stop answered at a stop already restored everything
+            // above. This still covers the paths that never reach handleException at all -- a
+            // free-running target, or one paused with task_suspend.
+            mTeardownStage.store(TeardownStage::RestoringBreakpoints, std::memory_order_release);
             std::string restoreError;
             if(!mBreakpoints.RestoreAll(mProcess->task, kLoopArch, &restoreError))
                 cbInternalError("could not remove this engine's breakpoints from the target "
@@ -418,8 +423,23 @@ namespace MachBug
             // effect: not slower, not at all. Reproduced 3/3 with the documented sequence (Init ->
             // Start -> answer the first stop with Continue -> Stop) before this fix; see
             // Process::DetachAndKill()'s comment in Process.h.
+            mTeardownStage.store(TeardownStage::Detaching, std::memory_order_release);
             Process::DetachAndKill(mProcess->pid, nullptr);
         }
+
+        mTeardownStage.store(TeardownStage::Finished, std::memory_order_release);
+    }
+
+    const char* Debugger::TeardownStageName() const
+    {
+        switch(mTeardownStage.load(std::memory_order_acquire))
+        {
+        case TeardownStage::Running:               return "still in the receive loop";
+        case TeardownStage::RestoringBreakpoints:  return "restoring the target's bytes";
+        case TeardownStage::Detaching:             return "detaching and killing the target";
+        case TeardownStage::Finished:              return "finished";
+        }
+        return "unknown";
     }
 
     kern_return_t Debugger::handleException(const mach_port_t thread, const exception_type_t exception,
@@ -748,6 +768,30 @@ namespace MachBug
             // immediately, which is visible and recoverable, while parking it forever is neither.
             cbInternalError("could not step off the breakpoint: " + cycleError);
             mStoppedAtBreakpoint = 0;
+        }
+
+        if(decision == Command::Stop)
+        {
+            // Before the reply, not after it. Returning from here resumes the reporting thread,
+            // and if the stop was on a breakpoint it resumes onto the trap it is standing on --
+            // raising an exception at a port whose loop is, by then, on its way out. Nobody
+            // answers it, the thread stays blocked in the kernel, and the kill that follows is
+            // dealing with a process in that state. The teardown below did this restore, but
+            // one reply too late to prevent the window (issue #107).
+            std::string restoreError;
+            if(mProcess && !mBreakpoints.RestoreAll(mProcess->task, kLoopArch, &restoreError))
+                cbInternalError("could not remove this engine's breakpoints before letting the "
+                                 "target go: " + restoreError);
+
+            // The step this engine armed to get off a breakpoint goes with them, for the same
+            // reason: a target resumed with the trap flag still set traps again immediately.
+            if(mStepArmed)
+            {
+                std::string stepError;
+                if(!arch::SetSingleStep(kLoopArch, thread, false, &stepError))
+                    cbInternalError(stepError);
+                mStepArmed = false;
+            }
         }
 
         if(decision == Command::StepInto)
