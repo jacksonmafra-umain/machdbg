@@ -69,6 +69,13 @@ namespace MachBug::arch
     {
         uint32_t exec;
         uint32_t watch;
+
+        // Whether the two counts name the same registers. True on x86-64, where DR0-DR3 serve
+        // execution breakpoints and watchpoints alike, so a watchpoint takes a slot an execution
+        // breakpoint could otherwise have used; false on arm64, where BVR and WVR are separate
+        // register files and the two kinds never compete. An allocator that ignores this hands
+        // out the same DR twice.
+        bool shared;
     };
 
     DebugSlotCounts SlotCounts(DbgArch arch);
@@ -83,7 +90,16 @@ namespace MachBug::arch
     // none of them until it is written too.
     struct DebugSlots
     {
+        struct Watch
+        {
+            uint64_t address = 0;
+            uint32_t size = 0;
+            bool onRead = false;
+            bool onWrite = false;
+        };
+
         std::vector<uint64_t> exec;
+        std::vector<Watch> watch;
     };
 
     // Writes `slots` into one thread, leaving every debug register these slots do not describe
@@ -92,4 +108,37 @@ namespace MachBug::arch
     // middle of.
     bool ApplyDebugState(DbgArch arch, mach_port_t thread, const DebugSlots& slots,
                          std::string* error);
+
+    // Whether the hardware can watch `size` bytes at `address`, and if not, why. One rule for
+    // both architectures, and deliberately the intersection of the two rather than the most
+    // either can express: x86-64's DR7 encodes lengths of 1, 2, 4 and 8 only and requires the
+    // address to be a multiple of the length, while arm64's byte-address-select mask could in
+    // principle cover other shapes within a doubleword. A watchpoint that means something
+    // different on each architecture is worse than one that means less on both.
+    //
+    // A size the hardware cannot encode is refused here rather than rounded up to one it can: a
+    // three-byte watchpoint silently widened to four fires on the neighbouring byte and reports
+    // it as the address the caller asked about.
+    bool WatchpointFits(DbgArch arch, uint64_t address, uint32_t size, std::string* error);
+
+    // What a debug exception was, when the exception itself says. Only watchpoints are decidable
+    // this way, and only one architecture says it outright:
+    //
+    //   arm64, MEASURED: a write watchpoint arrives as EXC_BREAKPOINT with code[0] = 0x102
+    //   (EXC_ARM_DA_DEBUG) and code[1] = the DATA address -- not the program counter, which sits
+    //   in the thread state and points at the instruction that made the access. An execution
+    //   breakpoint arrives with code[0] = 0x1, so here the subcode does separate the two.
+    //
+    //   x86-64: the exception carries neither a subcode that distinguishes them nor an address
+    //   (code[1] is 0). DR6's low four bits say which slot fired and DR7 says what that slot was
+    //   watching, so the thread's own registers are the only place the answer lives -- which is
+    //   why this takes a thread port rather than only the exception.
+    struct DebugTrap
+    {
+        bool isWatchpoint = false;
+        uint64_t dataAddress = 0;
+    };
+
+    DebugTrap DecodeDebugTrap(DbgArch arch, mach_port_t thread, exception_type_t exception,
+                              const int64_t* code, uint32_t codeCnt);
 }

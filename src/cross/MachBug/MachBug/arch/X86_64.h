@@ -51,4 +51,8 @@ namespace MachBug::arch::X86_64
     // slots `slots` does not describe. The rest of DR7 -- and the TF bit, which lives in rflags
     // rather than here -- is left as it was.
     bool ApplyDebugState(mach_port_t thread, const DebugSlots& slots, std::string* error);
+
+    // See arch::DecodeDebugTrap for what each architecture's exception does and does not say.
+    DebugTrap DecodeDebugTrap(mach_port_t thread, exception_type_t exception, const int64_t* code,
+                              uint32_t codeCnt);
 }

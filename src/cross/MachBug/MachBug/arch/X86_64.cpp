@@ -291,9 +291,9 @@ namespace MachBug::arch::X86_64
     {
         // Four debug address registers, DR0-DR3, fixed by the architecture rather than something
         // to ask the machine about. Both numbers are the same four registers rather than four of
-        // each: execution breakpoints and watchpoints share the pool here, unlike arm64 where
-        // BVR and WVR are separate files.
-        return {4, 4};
+        // each -- which is what `shared` says: execution breakpoints and watchpoints draw from
+        // one pool here, unlike arm64 where BVR and WVR are separate files.
+        return {4, 4, true};
     }
 
     bool ApplyDebugState(const mach_port_t thread, const DebugSlots& slots, std::string* error)
@@ -323,23 +323,57 @@ namespace MachBug::arch::X86_64
                                                &state.__dr3};
         for(uint32_t slot = 0; slot < 4; ++slot)
         {
-            const uint64_t address = slot < slots.exec.size() ? slots.exec[slot] : 0;
-            *addressRegisters[slot] = address;
+            const uint64_t execAddress = slot < slots.exec.size() ? slots.exec[slot] : 0;
+            const DebugSlots::Watch watch =
+                slot < slots.watch.size() ? slots.watch[slot] : DebugSlots::Watch{};
 
-            // DR7 holds two fields per slot: a local-enable bit at 2*slot, and a four-bit
-            // read/write-and-length field at 16 + 4*slot. Zeroes in that field mean "break on
-            // instruction execution, one byte", which is why clearing it is also what configures
-            // it and why an execution breakpoint needs no length.
+            // DR7 holds two fields per slot: a local-enable bit at 2*slot, and a four-bit field
+            // at 16 + 4*slot whose low two bits are the type and whose high two are the length.
             const uint64_t localEnable = 1ull << (2 * slot);
             const uint64_t typeAndLength = 0xFull << (16 + 4 * slot);
             state.__dr7 &= ~(localEnable | typeAndLength);
-            if(address != 0)
+
+            if(execAddress != 0)
+            {
+                // Type 00 and length 00: break on instruction execution. Both fields are zero,
+                // which is why clearing the field is also what configures it, and why an
+                // execution breakpoint carries no length.
+                *addressRegisters[slot] = execAddress;
                 state.__dr7 |= localEnable;
+                continue;
+            }
+
+            if(watch.address == 0 || watch.size == 0 || (!watch.onRead && !watch.onWrite))
+            {
+                *addressRegisters[slot] = 0;
+                continue;
+            }
+
+            // Type: 01 breaks on writes, 11 on reads or writes. There is no read-only encoding
+            // -- x86-64 simply does not have one -- so a watchpoint asked to fire on reads fires
+            // on writes as well here, and machbug_api.h says so rather than this pretending
+            // otherwise. Length: 00 is one byte, 01 two, 11 four, 10 eight. That 10 for eight,
+            // out of order, is the architecture's own encoding and not a transcription slip.
+            const uint64_t type = watch.onRead ? 0b11ull : 0b01ull;
+            uint64_t length = 0b00ull;
+            switch(watch.size)
+            {
+            case 2: length = 0b01ull; break;
+            case 4: length = 0b11ull; break;
+            case 8: length = 0b10ull; break;
+            default: length = 0b00ull; break;
+            }
+
+            *addressRegisters[slot] = watch.address;
+            state.__dr7 |= localEnable | (type << (16 + 4 * slot)) |
+                           (length << (18 + 4 * slot));
         }
 
-        // DR6 records which slot fired, and is left as the kernel presents it: nothing here
-        // reads it -- the dispatch matches on the address the exception carries -- and clearing
-        // a bit the kernel has already consumed would be guessing at its bookkeeping.
+        // DR6's low four bits say which slot last fired, and the kernel does not clear them
+        // between hits. Cleared here, on every write, because the engine re-applies this state
+        // on both halves of the step-off cycle a hit runs through: a bit left set from the
+        // previous hit would make the next decode name a slot that did not fire.
+        state.__dr6 &= ~0xFull;
         const kern_return_t set = thread_set_state(thread, x86_DEBUG_STATE64,
             reinterpret_cast<thread_state_t>(&state), x86_DEBUG_STATE64_COUNT);
         if(set != KERN_SUCCESS)
@@ -350,6 +384,44 @@ namespace MachBug::arch::X86_64
             return false;
         }
         return true;
+    }
+
+    DebugTrap DecodeDebugTrap(const mach_port_t thread, const exception_type_t exception,
+                              const int64_t*, const uint32_t)
+    {
+        // Nothing in the message to go on: x86-64's EXC_BREAKPOINT carries no address in code[1]
+        // (measured on CI as `code1=0`) and no subcode that separates a watchpoint from an
+        // execution breakpoint. The answer lives in the thread's own registers -- DR6's low four
+        // bits say which slot fired, DR7 says what that slot was watching -- which is why this
+        // one needs a thread port where arm64's does not.
+        if(exception != EXC_BREAKPOINT || thread == MACH_PORT_NULL)
+            return {};
+
+        x86_debug_state64_t state{};
+        mach_msg_type_number_t count = x86_DEBUG_STATE64_COUNT;
+        if(thread_get_state(thread, x86_DEBUG_STATE64,
+                            reinterpret_cast<thread_state_t>(&state), &count) != KERN_SUCCESS)
+            return {};
+
+        const uint64_t* const addressRegisters[4] = {&state.__dr0, &state.__dr1, &state.__dr2,
+                                                     &state.__dr3};
+        for(uint32_t slot = 0; slot < 4; ++slot)
+        {
+            if((state.__dr6 & (1ull << slot)) == 0)
+                continue;
+
+            // Type 00 is an execution breakpoint, which this function does not claim: the
+            // program counter already names it, and the dispatch matches on that.
+            const uint64_t type = (state.__dr7 >> (16 + 4 * slot)) & 0b11ull;
+            if(type == 0b00ull)
+                continue;
+
+            DebugTrap trap;
+            trap.isWatchpoint = true;
+            trap.dataAddress = *addressRegisters[slot];
+            return trap;
+        }
+        return {};
     }
 
 #else
@@ -383,7 +455,12 @@ namespace MachBug::arch::X86_64
     {
         // No x86-64 debug registers on this machine to allocate. Answering with the
         // architectural four would let a caller allocate slots that cannot be written.
-        return {0, 0};
+        return {0, 0, false};
+    }
+
+    DebugTrap DecodeDebugTrap(mach_port_t, exception_type_t, const int64_t*, uint32_t)
+    {
+        return {};
     }
 
     bool ApplyDebugState(mach_port_t, const DebugSlots&, std::string* error)
