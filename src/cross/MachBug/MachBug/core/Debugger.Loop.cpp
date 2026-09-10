@@ -47,6 +47,13 @@ namespace
     // nothing.
     constexpr mach_msg_timeout_t kExitPollIntervalMs = 20;
 
+    // The exceptions this engine asks for. Named once because the teardown has to hand the same
+    // set back, and a release that covers less than the install leaves a port registered for
+    // exceptions nobody is going to answer.
+    constexpr exception_mask_t kExceptionMask =
+        EXC_MASK_BREAKPOINT | EXC_MASK_BAD_ACCESS | EXC_MASK_BAD_INSTRUCTION |
+        EXC_MASK_ARITHMETIC | EXC_MASK_SOFTWARE;
+
     // task_set_exception_ports()'s flavor argument is not optional whenever the requested
     // behavior carries EXCEPTION_STATE (EXCEPTION_STATE_IDENTITY does): THREAD_STATE_NONE is
     // only valid for plain EXCEPTION_DEFAULT. An earlier version of this file passed
@@ -217,8 +224,7 @@ namespace MachBug
         // *zero* state and expect delivery to still happen.
         kr = task_set_exception_ports(
             mProcess->task,
-            EXC_MASK_BREAKPOINT | EXC_MASK_BAD_ACCESS | EXC_MASK_BAD_INSTRUCTION |
-                EXC_MASK_ARITHMETIC | EXC_MASK_SOFTWARE,
+            kExceptionMask,
             exceptionPort,
             EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES,
             kExceptionPortStateFlavor);
@@ -423,6 +429,14 @@ namespace MachBug
             // effect: not slower, not at all. Reproduced 3/3 with the documented sequence (Init ->
             // Start -> answer the first stop with Continue -> Stop) before this fix; see
             // Process::DetachAndKill()'s comment in Process.h.
+            // The same release the Stop path above does, for the targets that never reach it:
+            // one that was free-running when Stop() arrived, or paused with task_suspend. Both
+            // still have this port registered, and an exception raised into a loop that has
+            // gone blocks the thread that raised it.
+            task_set_exception_ports(mProcess->task, kExceptionMask, MACH_PORT_NULL,
+                                     EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES,
+                                     kExceptionPortStateFlavor);
+
             mTeardownStage.store(TeardownStage::Detaching, std::memory_order_release);
             Process::DetachAndKill(mProcess->pid, nullptr);
         }
@@ -782,6 +796,27 @@ namespace MachBug
             if(mProcess && !mBreakpoints.RestoreAll(mProcess->task, kLoopArch, &restoreError))
                 cbInternalError("could not remove this engine's breakpoints before letting the "
                                  "target go: " + restoreError);
+
+            // MEASURED, and the reason the previous attempt at this was not enough: answering a
+            // debug exception queues a SIGTRAP for the thread (issue #109), and with this port
+            // still registered that signal comes back here as one more exception -- to a loop
+            // that has already left. The thread then sits in the kernel waiting for a reply
+            // nobody will send, and the ptrace detach and kill that follow are dealing with a
+            // process in that state. The harness's guard caught exactly that and named the
+            // stage: "detaching and killing the target", with no sign of
+            // WaitForRealExit()'s own bound having elapsed.
+            //
+            // Handing the mask back before the reply is what closes it: the straggler signal
+            // gets default handling on a process this engine is about to kill anyway.
+            if(mProcess)
+            {
+                const kern_return_t released = task_set_exception_ports(
+                    mProcess->task, kExceptionMask, MACH_PORT_NULL,
+                    EXCEPTION_STATE_IDENTITY | MACH_EXCEPTION_CODES, kExceptionPortStateFlavor);
+                if(released != KERN_SUCCESS)
+                    cbInternalError("could not hand the exception ports back before detaching: " +
+                                     Process::DescribeKernReturn(released));
+            }
 
             // The step this engine armed to get off a breakpoint goes with them, for the same
             // reason: a target resumed with the trap flag still set traps again immediately.
