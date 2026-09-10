@@ -107,10 +107,11 @@ cmake --build build/macos-arm64 --target MachBug_tests
 
 ## Seeing a target's registers and memory
 
-`regview` is milestone 3's proof: it launches or attaches to a target, stops it, and shows its
-registers and the memory around its program counter. It is a sample app in the shape of milestone
-1's four, not the debugger -- the debugger's own window needs disassembly, breakpoints and modules
-from later milestones, so it stays Linux-only until those exist.
+`regview` is milestone 3's proof, extended by milestone 4: it launches or attaches to a target,
+stops it, shows its registers and the memory around its program counter, and carries a breakpoint
+bench (see below). It is a sample app in the shape of milestone 1's four, not the debugger -- the
+debugger's own window needs disassembly and modules from later milestones, so it stays Linux-only
+until those exist.
 
 ```bash
 cd src/cross
