@@ -11,6 +11,16 @@ namespace MachBug
 {
     namespace
     {
+        bool isHardware(const DbgBreakpointKind kind)
+        {
+            return kind != DbgBreakpointKind_Software;
+        }
+
+        bool isWatchpoint(const DbgBreakpointKind kind)
+        {
+            return kind == DbgBreakpointKind_HwRead || kind == DbgBreakpointKind_HwWrite;
+        }
+
         std::string hex(const uint64_t value)
         {
             char buffer[32]{};
@@ -26,15 +36,22 @@ namespace MachBug
         mThreadSource = std::move(source);
     }
 
-    int Breakpoints::allocateExecSlotLocked(const DbgArch arch) const
+    int Breakpoints::allocateSlotLocked(const DbgArch arch, const DbgBreakpointKind kind) const
     {
-        const uint32_t slots = arch::SlotCounts(arch).exec;
-        for(uint32_t slot = 0; slot < slots; ++slot)
+        const arch::DebugSlotCounts counts = arch::SlotCounts(arch);
+        const bool wantWatch = isWatchpoint(kind);
+        const uint32_t available = wantWatch ? counts.watch : counts.exec;
+
+        for(uint32_t slot = 0; slot < available; ++slot)
         {
+            // On a shared pool a slot is taken by *any* hardware breakpoint, watchpoint or not:
+            // the same DR holds either, so ignoring the other kind would hand out a register
+            // that is already in use and quietly replace what was in it.
             const bool taken = std::any_of(mEntries.begin(), mEntries.end(),
-                [slot](const Entry& entry) {
-                    return entry.kind == DbgBreakpointKind_HwExec &&
-                           entry.slot == static_cast<int>(slot);
+                [slot, wantWatch, &counts](const Entry& entry) {
+                    if(!isHardware(entry.kind) || entry.slot != static_cast<int>(slot))
+                        return false;
+                    return counts.shared || isWatchpoint(entry.kind) == wantWatch;
                 });
             if(!taken)
                 return static_cast<int>(slot);
@@ -44,14 +61,32 @@ namespace MachBug
 
     arch::DebugSlots Breakpoints::hardwareSlotsLocked(const DbgArch arch) const
     {
+        const arch::DebugSlotCounts counts = arch::SlotCounts(arch);
+
         arch::DebugSlots slots;
-        slots.exec.assign(arch::SlotCounts(arch).exec, 0);
+        slots.exec.assign(counts.exec, 0);
+        slots.watch.assign(counts.watch, arch::DebugSlots::Watch{});
+
         for(const Entry& entry : mEntries)
         {
-            if(entry.kind != DbgBreakpointKind_HwExec || !entry.armed || entry.slot < 0)
+            if(!isHardware(entry.kind) || !entry.armed || entry.slot < 0)
                 continue;
-            if(static_cast<uint32_t>(entry.slot) < slots.exec.size())
-                slots.exec[static_cast<std::size_t>(entry.slot)] = entry.address;
+            const std::size_t slot = static_cast<std::size_t>(entry.slot);
+
+            if(entry.kind == DbgBreakpointKind_HwExec)
+            {
+                if(slot < slots.exec.size())
+                    slots.exec[slot] = entry.address;
+                continue;
+            }
+
+            if(slot >= slots.watch.size())
+                continue;
+            arch::DebugSlots::Watch& watch = slots.watch[slot];
+            watch.address = entry.address;
+            watch.size = entry.size;
+            watch.onRead = entry.kind == DbgBreakpointKind_HwRead;
+            watch.onWrite = entry.kind == DbgBreakpointKind_HwWrite;
         }
         return slots;
     }
@@ -105,7 +140,7 @@ namespace MachBug
         // an all-zero slot table would be harmless in effect and wrong in principle: this engine
         // would be clearing debug registers it never set, on every thread a target ever creates.
         const bool anyHardware = std::any_of(mEntries.begin(), mEntries.end(),
-            [](const Entry& entry) { return entry.kind == DbgBreakpointKind_HwExec; });
+            [](const Entry& entry) { return isHardware(entry.kind); });
         if(!anyHardware)
             return true;
 
@@ -118,7 +153,7 @@ namespace MachBug
         if(entry.armed)
             return true;
 
-        if(entry.kind == DbgBreakpointKind_HwExec)
+        if(isHardware(entry.kind))
         {
             // Marked armed before the write, because the slot table is built from what the
             // entries say -- and put back if the write does not happen, so the table never
@@ -130,15 +165,6 @@ namespace MachBug
                 return false;
             }
             return true;
-        }
-
-        // Watchpoints are task 6. Refused by name rather than quietly turned into an execution
-        // breakpoint, which would stop on the wrong event entirely.
-        if(entry.kind != DbgBreakpointKind_Software)
-        {
-            if(error)
-                *error = "watchpoints are not implemented yet";
-            return false;
         }
 
         const arch::Trap trap = arch::SoftwareTrap(arch);
@@ -174,7 +200,7 @@ namespace MachBug
         if(!entry.armed)
             return true;
 
-        if(entry.kind == DbgBreakpointKind_HwExec)
+        if(isHardware(entry.kind))
         {
             entry.armed = false;
             if(!applyHardwareLocked(arch, error))
@@ -183,13 +209,6 @@ namespace MachBug
                 return false;
             }
             return true;
-        }
-
-        if(entry.kind != DbgBreakpointKind_Software)
-        {
-            if(error)
-                *error = "watchpoints are not implemented yet";
-            return false;
         }
 
         if(entry.original.empty())
@@ -245,18 +264,26 @@ namespace MachBug
         entry.size = size;
         entry.enabled = true;
 
-        if(kind == DbgBreakpointKind_HwExec)
+        if(isHardware(kind))
         {
-            entry.slot = allocateExecSlotLocked(arch);
+            if(isWatchpoint(kind) && !arch::WatchpointFits(arch, address, size, error))
+                return false;
+
+            entry.slot = allocateSlotLocked(arch, kind);
             if(entry.slot < 0)
             {
-                const uint32_t slots = arch::SlotCounts(arch).exec;
+                const arch::DebugSlotCounts counts = arch::SlotCounts(arch);
+                const uint32_t slots = isWatchpoint(kind) ? counts.watch : counts.exec;
+                const std::string what = isWatchpoint(kind) ? "watchpoint" : "execution";
                 if(error)
                     *error = "cannot set a hardware breakpoint at " + hex(address) + ": this "
-                             "machine has " + std::to_string(slots) + " execution slots and all " +
-                             std::to_string(slots) + " are in use. A hardware breakpoint is not "
-                             "quietly downgraded to a software one, because a caller that asked "
-                             "for hardware asked for the target's bytes to be left alone";
+                             "machine has " + std::to_string(slots) + " " + what + " slots and "
+                             "all " + std::to_string(slots) + " are in use" +
+                             (counts.shared ? " (execution breakpoints and watchpoints share "
+                                              "them on this architecture)" : "") +
+                             ". A hardware breakpoint is not quietly downgraded to a software "
+                             "one, because a caller that asked for hardware asked for the "
+                             "target's bytes to be left alone";
                 return false;
             }
         }

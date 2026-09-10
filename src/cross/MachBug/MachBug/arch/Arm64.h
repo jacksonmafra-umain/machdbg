@@ -65,4 +65,8 @@ namespace MachBug::arch::Arm64
     // does not describe. MDSCR_EL1 and the watchpoint registers are read and written back
     // untouched: single-step shares this state, and a step armed elsewhere must survive.
     bool ApplyDebugState(mach_port_t thread, const DebugSlots& slots, std::string* error);
+
+    // See arch::DecodeDebugTrap for what each architecture's exception does and does not say.
+    DebugTrap DecodeDebugTrap(mach_port_t thread, exception_type_t exception, const int64_t* code,
+                              uint32_t codeCnt);
 }

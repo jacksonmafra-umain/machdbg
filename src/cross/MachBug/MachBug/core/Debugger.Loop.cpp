@@ -444,8 +444,40 @@ namespace MachBug
         // one -- and the only chance, since nothing notifies a debugger of a thread's birth.
         refreshThreads();
 
-        const bool wasStepCompletion = mStepArmed &&
+        bool wasStepCompletion = mStepArmed &&
             arch::IsSingleStepTrap(kLoopArch, exception, code, codeCnt);
+
+        // MEASURED, and the reason a watchpoint could not be stepped off at all until this
+        // existed: answering a watchpoint's exception queues a SIGTRAP for the thread, which
+        // arrives as EXC_SOFTWARE/EXC_SOFT_SIGNAL/SIGTRAP *before* the armed step has run a
+        // single instruction. It is shaped exactly like the step completion of a software
+        // breakpoint (task 3 measured that one arriving the same way), so the engine counted it
+        // as the step, re-armed the watchpoint, and resumed a thread that had executed nothing:
+        //
+        //     exception=6 code0=0x102 code1=<the global>     the watchpoint
+        //     exception=5 code0=0x10003 code1=0x5            SIGTRAP, stepArmed=1, pc unchanged
+        //     exception=6 code0=0x102 code1=<the global>     the same store, forever
+        //
+        // What separates the two is the program counter: a step that completed moved it, and
+        // this one did not. So a trap that arrives at the address the cycle started from is the
+        // leftover signal rather than the step -- suppressed here (PT_THUPDATE works now, where
+        // it was refused as EBUSY at the watchpoint stop itself, because only now is a signal
+        // actually pending), and the step is left armed to complete on its own.
+        if(wasStepCompletion && mSteppingOverBreakpoint && mSteppingOffFromPc != 0)
+        {
+            DbgRegisters regs{};
+            std::string readError;
+            if(arch::Read(kLoopArch, thread, &regs, &readError))
+            {
+                const uint64_t pc =
+                    kLoopArch == DbgArch_Arm64 ? regs.arm64.pc : regs.x86_64.rip;
+                if(pc == mSteppingOffFromPc)
+                {
+                    suppressPendingSignal(thread, "the trap the stop itself queued");
+                    return KERN_SUCCESS;
+                }
+            }
+        }
         if(wasStepCompletion)
             mStepArmed = false;
         if(wasStepCompletion)
@@ -480,11 +512,35 @@ namespace MachBug
                                  rearmError);
             }
             mStoppedAtBreakpoint = 0;
+            mSteppingOffFromPc = 0;
 
             if(!mStepWasRequested)
                 return KERN_SUCCESS;   // resume, silently: nobody asked to be told about this
             mStepWasRequested = false;
         }
+
+        // The other half of the same measurement: answering an EXC_BREAKPOINT queues a SIGTRAP
+        // for the thread, and it arrives here as a passthrough after the reply has gone out.
+        // While a step is armed that passthrough IS how a step off a software breakpoint
+        // completes (task 3 measured that), so those two cases are handled above and this one
+        // catches what is left: a trap this engine caused, whose signal the target never asked
+        // for and must not be stopped by. Answered and swallowed rather than reported -- an
+        // unexplained EXC_SOFTWARE parked the target after every watchpoint hit until this
+        // existed.
+        constexpr int32_t kExcSoftSignalCode = 0x10003;
+        const bool queuedTrapArrived =
+            mQueuedSigTrapExpected && !mStepArmed && exception == EXC_SOFTWARE &&
+            codeCnt >= 2 && code[0] == kExcSoftSignalCode && code[1] == SIGTRAP;
+        if(queuedTrapArrived)
+        {
+            mQueuedSigTrapExpected = false;
+            suppressPendingSignal(thread, "the trap this engine caused");
+            return KERN_SUCCESS;
+        }
+
+        // Set for the reply this call is about to send, and only for the exception kind that was
+        // measured to queue one.
+        mQueuedSigTrapExpected = exception == EXC_BREAKPOINT;
 
         // EXC_SOFTWARE with code[0] == EXC_SOFT_SIGNAL is how PT_ATTACHEXC (Start(), above)
         // routes an ordinary BSD signal through this port instead of delivering it directly;
@@ -534,8 +590,39 @@ namespace MachBug
         // architectures report a software trap as EXC_BREAKPOINT, and the accompanying code says
         // which *kind* of debug event it was, never which of this engine's breakpoints. Only the
         // table knows that.
+        //
+        // A watchpoint is the exception to that, and has to be, because the address it stopped
+        // on is not the program counter: it is the data address the instruction touched. The
+        // architecture layer is what knows where to find it -- in code[1] on arm64, in the
+        // thread's own DR6/DR7 on x86-64 -- and a watchpoint hit matched against the program
+        // counter finds nothing at all.
         uint64_t hitBreakpoint = 0;
-        if(!wasStepCompletion && exception == EXC_BREAKPOINT && mSeenFirstStop)
+        const arch::DebugTrap debugTrap = !wasStepCompletion && mSeenFirstStop
+            ? arch::DecodeDebugTrap(kLoopArch, thread, exception, code, codeCnt)
+            : arch::DebugTrap{};
+
+        if(debugTrap.isWatchpoint)
+        {
+            // MEASURED, and it costs the target its progress if it is not done: answering a
+            // watchpoint exception with KERN_SUCCESS leaves a SIGTRAP pending for the thread,
+            // which arrives immediately afterwards as EXC_SOFTWARE/EXC_SOFT_SIGNAL/SIGTRAP. With
+            // a step armed -- which the step-off cycle always has here -- that passthrough is
+            // indistinguishable from a step completion, so the engine re-armed the watchpoint on
+            // a thread that had not executed anything, and the target sat on the same
+            // instruction forever: pc unchanged and the watched value never incremented across
+            // repeated hits.
+            //
+            // Task 3 found the kernel refuses this for a software breakpoint trap (EBUSY, no
+            // signal pending). A watchpoint is the other case: there is one, and it is this
+            // engine's own machinery rather than anything the target asked for.
+            const auto entry = mBreakpoints.Find(debugTrap.dataAddress);
+            if(entry && entry->armed)
+                hitBreakpoint = debugTrap.dataAddress;
+            // No program-counter rewind here, unlike a software trap: nothing was patched, and
+            // the pc points at the instruction that made the access rather than at anything the
+            // engine put there.
+        }
+        else if(!wasStepCompletion && exception == EXC_BREAKPOINT && mSeenFirstStop)
         {
             DbgRegisters regs{};
             std::string readError;
@@ -630,6 +717,15 @@ namespace MachBug
                 mBreakpoints.Disarm(mProcess->task, kLoopArch, mStoppedAtBreakpoint, &cycleError);
             if(disarmed && arch::SetSingleStep(kLoopArch, thread, true, &cycleError))
             {
+                // Where the cycle started, so a trap that has not moved off it can be recognised
+                // as not being the step. Read here rather than remembered from the stop, because
+                // a caller may have written the program counter while the target was parked.
+                DbgRegisters regs{};
+                std::string readError;
+                mSteppingOffFromPc = arch::Read(kLoopArch, thread, &regs, &readError)
+                    ? (kLoopArch == DbgArch_Arm64 ? regs.arm64.pc : regs.x86_64.rip)
+                    : 0;
+
                 mStepArmed = true;
                 mSteppingOverBreakpoint = true;
                 mStepWasRequested = decision == Command::StepInto;
@@ -788,10 +884,15 @@ namespace MachBug
         // PT_THUPDATE decides a passed-through signal's fate: its third argument is the thread
         // port and its fourth is the signal to deliver, so zero means deliver nothing. Every trap
         // this engine set is its own machinery; the target never asked for it and must not see it.
+        // EBUSY is not a failure here, and reporting it as one was noise: the kernel answers
+        // that way when the thread has no pending signal at all -- which is exactly the state
+        // this call is trying to reach. It happens whenever the trap being answered has not
+        // queued its signal yet, and the signal then arrives as its own exception, which the
+        // caller above absorbs.
         errno = 0;
         if(ptrace(PT_THUPDATE, mProcess->pid,
                   reinterpret_cast<caddr_t>(static_cast<uintptr_t>(thread)), 0) == -1 &&
-           errno != 0)
+           errno != 0 && errno != EBUSY)
         {
             cbInternalError(std::string("could not suppress the signal for ") + what + ": " +
                              std::strerror(errno));

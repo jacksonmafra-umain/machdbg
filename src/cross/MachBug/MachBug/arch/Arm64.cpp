@@ -285,7 +285,9 @@ namespace MachBug::arch::Arm64
         // and four: if the sysctl ever stops answering, undercounting refuses breakpoints the
         // machine could have honoured, and overcounting writes registers it does not have. Only
         // one of those two mistakes is recoverable by the user.
-        return {ask("hw.optional.breakpoint", 2), ask("hw.optional.watchpoint", 2)};
+        // shared = false: BVR and WVR are separate register files here, so an execution
+        // breakpoint and a watchpoint never compete for the same slot.
+        return {ask("hw.optional.breakpoint", 2), ask("hw.optional.watchpoint", 2), false};
     }
 
     bool ApplyDebugState(const mach_port_t thread, const DebugSlots& slots, std::string* error)
@@ -318,12 +320,38 @@ namespace MachBug::arch::Arm64
         // constants for these fields.
         constexpr uint32_t kBcrEnabledForUserCode = 1u | (2u << 1) | (0xFu << 5);
 
-        const uint32_t implemented = SlotCounts().exec;
-        for(uint32_t slot = 0; slot < implemented; ++slot)
+        const DebugSlotCounts counts = SlotCounts();
+        for(uint32_t slot = 0; slot < counts.exec; ++slot)
         {
             const uint64_t address = slot < slots.exec.size() ? slots.exec[slot] : 0;
             state.__bvr[slot] = address;
             state.__bcr[slot] = address != 0 ? kBcrEnabledForUserCode : 0;
+        }
+
+        for(uint32_t slot = 0; slot < counts.watch; ++slot)
+        {
+            const DebugSlots::Watch watch =
+                slot < slots.watch.size() ? slots.watch[slot] : DebugSlots::Watch{};
+            if(watch.address == 0 || watch.size == 0 || (!watch.onRead && !watch.onWrite))
+            {
+                state.__wvr[slot] = 0;
+                state.__wcr[slot] = 0;
+                continue;
+            }
+
+            // WVR holds the doubleword; which bytes of it are watched is a mask in WCR, so the
+            // address is split between the two rather than written whole.
+            //
+            // WCR: E (bit 0), PAC = 0b10 (bits 2:1, EL0), LSC (bits 4:3) = 0b01 load, 0b10
+            // store, 0b11 either, and BAS (bits 12:5) selecting the bytes. Spelled out because
+            // the SDK publishes no constants for these fields.
+            const uint64_t doubleword = watch.address & ~7ull;
+            const uint32_t offset = static_cast<uint32_t>(watch.address - doubleword);
+            const uint32_t byteMask = ((1u << watch.size) - 1u) << offset;
+            const uint32_t loadStore = (watch.onRead ? 1u : 0u) | (watch.onWrite ? 2u : 0u);
+
+            state.__wvr[slot] = doubleword;
+            state.__wcr[slot] = 1u | (2u << 1) | (loadStore << 3) | ((byteMask & 0xFFu) << 5);
         }
 
         const kern_return_t set = thread_set_state(thread, ARM_DEBUG_STATE64,
@@ -336,6 +364,28 @@ namespace MachBug::arch::Arm64
             return false;
         }
         return true;
+    }
+
+    DebugTrap DecodeDebugTrap(const mach_port_t, const exception_type_t exception,
+                              const int64_t* code, const uint32_t codeCnt)
+    {
+        // MEASURED, and the reason this function exists on arm64 at all: a write watchpoint
+        // arrives as EXC_BREAKPOINT with code[0] = 0x102 (EXC_ARM_DA_DEBUG) and code[1] = the
+        // data address, where an execution breakpoint arrives with code[0] = 0x1 and code[1] =
+        // the program counter. So the subcode does tell watchpoints apart here -- and it has to,
+        // because the address in code[1] means something different in each case, and matching a
+        // data address against the code the program counter would have matched finds nothing.
+        //
+        // No thread port needed: everything is in the message. x86-64's twin is the opposite.
+        constexpr int64_t kExcArmDaDebug = 0x102;
+        if(exception != EXC_BREAKPOINT || codeCnt < 2 || code == nullptr ||
+           code[0] != kExcArmDaDebug)
+            return {};
+
+        DebugTrap trap;
+        trap.isWatchpoint = true;
+        trap.dataAddress = static_cast<uint64_t>(code[1]);
+        return trap;
     }
 
 #else
@@ -369,7 +419,12 @@ namespace MachBug::arch::Arm64
         // The sysctl this reads on an arm64 host describes the host's own CPU, so asking it here
         // would answer with an Intel machine's debug registers under an arm64 label. No slots is
         // the truthful answer: there are no arm64 debug registers on this machine to allocate.
-        return {0, 0};
+        return {0, 0, false};
+    }
+
+    DebugTrap DecodeDebugTrap(mach_port_t, exception_type_t, const int64_t*, uint32_t)
+    {
+        return {};
     }
 
     bool ApplyDebugState(mach_port_t, const DebugSlots&, std::string* error)

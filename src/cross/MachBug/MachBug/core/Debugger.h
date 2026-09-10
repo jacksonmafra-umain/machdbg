@@ -353,6 +353,18 @@ namespace MachBug
         bool mSteppingOverBreakpoint = false;
         bool mStepWasRequested = false;
 
+        // Loop-thread only. The program counter the step-off cycle started at, or 0 when no
+        // cycle is running. A trap that arrives with the program counter still on it did not
+        // execute anything and is therefore not the step -- see the measurement in
+        // Debugger.Loop.cpp for the watchpoint case that made this necessary.
+        uint64_t mSteppingOffFromPc = 0;
+
+        // Loop-thread only. True while a SIGTRAP queued by an exception this engine already
+        // answered is still expected to arrive. See the measurement in Debugger.Loop.cpp: the
+        // kernel delivers the Mach exception first and the BSD signal afterwards, and the second
+        // one is this engine's own doing rather than anything the target asked for.
+        bool mQueuedSigTrapExpected = false;
+
         // Guards mPendingCommand; handleException() waits on mCmdCv for Continue()/StepInto()/
         // Stop() to post one. This -- and nothing else in this class -- is the thread-safety
         // split machbug_api.h documents: Start() (and therefore handleException(), which only

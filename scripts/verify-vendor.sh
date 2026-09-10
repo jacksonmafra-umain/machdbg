@@ -78,6 +78,8 @@ required=(
     src/cross/MachBug/MachBug/core/Threads.cpp
     src/cross/MachBug/tests/threads.cpp
     src/cross/MachBug/tests/breakpoints_hardware.cpp
+    src/cross/MachBug/tests/watchpoints.cpp
+    src/cross/MachBug/tests/targets/writes_a_global.cpp
     src/cross/views/cmake.toml
     src/cross/views/CMakeLists.txt
     src/cross/views/RegisterFormat.h

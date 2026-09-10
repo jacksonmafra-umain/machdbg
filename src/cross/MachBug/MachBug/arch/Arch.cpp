@@ -1,6 +1,7 @@
 #include <MachBug/arch/Arch.h>
 
 #include <cstdint>
+#include <string>
 
 #include <MachBug/arch/Arm64.h>
 #include <MachBug/arch/X86_64.h>
@@ -147,6 +148,52 @@ namespace MachBug::arch
             if(error)
                 *error = "no debug registers for this architecture in this build";
             return false;
+        }
+    }
+
+    bool WatchpointFits(const DbgArch arch, const uint64_t address, const uint32_t size,
+                        std::string* error)
+    {
+        if(SlotCounts(arch).watch == 0)
+        {
+            if(error)
+                *error = "this build has no watchpoint registers for that architecture";
+            return false;
+        }
+
+        const bool encodable = size == 1 || size == 2 || size == 4 || size == 8;
+        if(!encodable)
+        {
+            if(error)
+                *error = "cannot watch " + std::to_string(size) + " bytes: the hardware encodes "
+                         "watchpoint sizes of 1, 2, 4 and 8 bytes only, and a size it cannot "
+                         "encode is refused rather than rounded up to one it can -- a watchpoint "
+                         "widened past what was asked for fires on the next variable along";
+            return false;
+        }
+
+        if((address % size) != 0)
+        {
+            if(error)
+                *error = "cannot watch " + std::to_string(size) + " bytes at that address: the "
+                         "address has to be a multiple of the size, and this one is not";
+            return false;
+        }
+        return true;
+    }
+
+    DebugTrap DecodeDebugTrap(const DbgArch arch, const mach_port_t thread,
+                              const exception_type_t exception, const int64_t* code,
+                              const uint32_t codeCnt)
+    {
+        switch(arch)
+        {
+        case DbgArch_Arm64:
+            return Arm64::DecodeDebugTrap(thread, exception, code, codeCnt);
+        case DbgArch_X86_64:
+            return X86_64::DecodeDebugTrap(thread, exception, code, codeCnt);
+        default:
+            return {};
         }
     }
 }

@@ -97,11 +97,15 @@ namespace MachBug
         bool armLocked(mach_port_t task, DbgArch arch, Entry& entry, std::string* error);
         bool disarmLocked(mach_port_t task, DbgArch arch, Entry& entry, std::string* error);
 
-        // The lowest execution slot no entry holds, or -1 when the machine has none left. Slots
-        // are kept across a disarm rather than handed back: the resume cycle disarms and re-arms
-        // constantly, and a breakpoint that changed slot each time would be one another thread
-        // could observe as absent.
-        int allocateExecSlotLocked(DbgArch arch) const;
+        // The lowest slot of the right kind that no entry holds, or -1 when the machine has
+        // none left. Slots are kept across a disarm rather than handed back: the resume cycle
+        // disarms and re-arms constantly, and a breakpoint that changed slot each time would be
+        // one another thread could observe as absent.
+        //
+        // Which slots count as "of the right kind" depends on the architecture: where execution
+        // breakpoints and watchpoints share registers, every hardware entry competes with every
+        // other one.
+        int allocateSlotLocked(DbgArch arch, DbgBreakpointKind kind) const;
 
         // Writes what the table currently says into every live thread's debug registers.
         bool applyHardwareLocked(DbgArch arch, std::string* error) const;
