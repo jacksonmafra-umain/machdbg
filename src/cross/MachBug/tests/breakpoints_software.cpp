@@ -69,75 +69,13 @@ namespace
         }
         return out;
     }
-
-    // Launches known_function, reads the address it prints, and leaves the target stopped with
-    // that address in hand. The capture technique is memory.cpp's: the fixture inherits fd 1 at
-    // spawn time, so this process's stdout is redirected for Init() and restored immediately,
-    // and nothing is asserted while it is redirected -- Catch2's -s trace would otherwise land in
-    // the capture file and corrupt the very line being read.
-    uint64_t launchAndFindFunction(RecordingDebugger& debugger)
-    {
-        char outPathTemplate[] = "/tmp/machbug_known_function.XXXXXX";
-        const int outFd = mkstemp(outPathTemplate);
-        if(outFd == -1)
-            return 0;
-        const std::string outPath = outPathTemplate;
-
-        const int savedStdout = dup(STDOUT_FILENO);
-        if(savedStdout == -1)
-            return 0;
-
-        std::fflush(stdout);
-        const int redirectRc = dup2(outFd, STDOUT_FILENO);
-        const bool launched = redirectRc != -1 && debugger.Init(FIXTURE("known_function").c_str());
-        const int restoreRc = dup2(savedStdout, STDOUT_FILENO);
-        close(savedStdout);
-
-        if(!launched || restoreRc == -1)
-        {
-            close(outFd);
-            unlink(outPath.c_str());
-            return 0;
-        }
-
-        debugger.StartOnThread();
-        if(!debugger.WaitFor(EventType::SystemBreakpoint))
-        {
-            close(outFd);
-            unlink(outPath.c_str());
-            return 0;
-        }
-
-        // Resumed so the fixture reaches its printf, then paused again: the table writes into a
-        // stopped target, which is the only state a debugger patches memory in anyway.
-        debugger.Continue();
-        debugger.WaitFor(EventType::Resumed);
-
-        uint64_t address = 0;
-        for(int attempt = 0; attempt < 500 && address == 0; ++attempt)
-        {
-            if(FILE* captured = std::fopen(outPath.c_str(), "r"))
-            {
-                unsigned long long printed = 0;
-                if(std::fscanf(captured, "%llx", &printed) == 1)
-                    address = printed;
-                std::fclose(captured);
-            }
-            if(address == 0)
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        close(outFd);
-        unlink(outPath.c_str());
-
-        debugger.Pause();
-        return address;
-    }
 }
 
 TEST_CASE("a software breakpoint replaces the target's bytes and puts them back")
 {
     RecordingDebugger debugger;
-    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    const uint64_t functionAddress =
+        MachBug::test::LaunchAndReadPublishedAddress(debugger, FIXTURE("known_function"));
     INFO("the fixture published its function at 0x" << std::hex << functionAddress);
     REQUIRE(functionAddress != 0);
     REQUIRE(debugger.IsStopped());
@@ -171,7 +109,8 @@ TEST_CASE("a software breakpoint replaces the target's bytes and puts them back"
 TEST_CASE("disabling a breakpoint takes the bytes out and enabling puts them back")
 {
     RecordingDebugger debugger;
-    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    const uint64_t functionAddress =
+        MachBug::test::LaunchAndReadPublishedAddress(debugger, FIXTURE("known_function"));
     REQUIRE(functionAddress != 0);
 
     const mach_port_t task = debugger.GetTaskPort();
@@ -278,7 +217,8 @@ TEST_CASE("the table refuses what it cannot do yet, by name")
 TEST_CASE("a software breakpoint's trap reaches the engine, and its program counter is measurable")
 {
     RecordingDebugger debugger;
-    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    const uint64_t functionAddress =
+        MachBug::test::LaunchAndReadPublishedAddress(debugger, FIXTURE("known_function"));
     REQUIRE(functionAddress != 0);
 
     const mach_port_t task = debugger.GetTaskPort();
@@ -320,7 +260,8 @@ TEST_CASE("a software breakpoint's trap reaches the engine, and its program coun
 TEST_CASE("a breakpoint hit is reported as a breakpoint, at the address it was set on")
 {
     RecordingDebugger debugger;
-    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    const uint64_t functionAddress =
+        MachBug::test::LaunchAndReadPublishedAddress(debugger, FIXTURE("known_function"));
     REQUIRE(functionAddress != 0);
 
     std::string error;
@@ -356,7 +297,8 @@ TEST_CASE("a breakpoint hit is reported as a breakpoint, at the address it was s
 TEST_CASE("continuing past a breakpoint runs the real instruction and keeps the breakpoint")
 {
     RecordingDebugger debugger;
-    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    const uint64_t functionAddress =
+        MachBug::test::LaunchAndReadPublishedAddress(debugger, FIXTURE("known_function"));
     REQUIRE(functionAddress != 0);
 
     std::string error;
@@ -384,7 +326,8 @@ TEST_CASE("continuing past a breakpoint runs the real instruction and keeps the 
 TEST_CASE("a disabled breakpoint stops nothing")
 {
     RecordingDebugger debugger;
-    const uint64_t functionAddress = launchAndFindFunction(debugger);
+    const uint64_t functionAddress =
+        MachBug::test::LaunchAndReadPublishedAddress(debugger, FIXTURE("known_function"));
     REQUIRE(functionAddress != 0);
 
     std::string error;

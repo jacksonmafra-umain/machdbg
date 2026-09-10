@@ -13,6 +13,7 @@
 #include <string>
 #include <sys/types.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 namespace MachBug::test
@@ -318,4 +319,72 @@ namespace MachBug::test
         int mExitCode = -1;
         std::thread mLoopThread;
     };
+
+    // Launches a fixture that prints one hexadecimal address on stdout, reads that address, and
+    // leaves the target stopped with it in hand. Two fixtures publish an address that way
+    // (known_function, writes_a_global) and every breakpoint test needs one, so the capture
+    // lives here rather than being copied per test file.
+    //
+    // The capture technique: the fixture inherits fd 1 at spawn time, so this process's stdout
+    // is redirected for Init() and restored immediately, and nothing is asserted while it is
+    // redirected -- Catch2's -s trace would otherwise land in the capture file and corrupt the
+    // very line being read.
+    inline uint64_t LaunchAndReadPublishedAddress(RecordingDebugger& debugger,
+                                                  const std::string& fixturePath)
+    {
+        char outPathTemplate[] = "/tmp/machbug_published_address.XXXXXX";
+        const int outFd = mkstemp(outPathTemplate);
+        if(outFd == -1)
+            return 0;
+        const std::string outPath = outPathTemplate;
+
+        const int savedStdout = dup(STDOUT_FILENO);
+        if(savedStdout == -1)
+            return 0;
+
+        std::fflush(stdout);
+        const int redirectRc = dup2(outFd, STDOUT_FILENO);
+        const bool launched = redirectRc != -1 && debugger.Init(fixturePath.c_str());
+        const int restoreRc = dup2(savedStdout, STDOUT_FILENO);
+        close(savedStdout);
+
+        if(!launched || restoreRc == -1)
+        {
+            close(outFd);
+            unlink(outPath.c_str());
+            return 0;
+        }
+
+        debugger.StartOnThread();
+        if(!debugger.WaitFor(EventType::SystemBreakpoint))
+        {
+            close(outFd);
+            unlink(outPath.c_str());
+            return 0;
+        }
+
+        // Resumed so the fixture reaches its printf, then paused again: a debugger writes into a
+        // stopped target, which is the only state its breakpoints are installed in anyway.
+        debugger.Continue();
+        debugger.WaitFor(EventType::Resumed);
+
+        uint64_t address = 0;
+        for(int attempt = 0; attempt < 500 && address == 0; ++attempt)
+        {
+            if(FILE* captured = std::fopen(outPath.c_str(), "r"))
+            {
+                unsigned long long printed = 0;
+                if(std::fscanf(captured, "%llx", &printed) == 1)
+                    address = printed;
+                std::fclose(captured);
+            }
+            if(address == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        close(outFd);
+        unlink(outPath.c_str());
+
+        debugger.Pause();
+        return address;
+    }
 }

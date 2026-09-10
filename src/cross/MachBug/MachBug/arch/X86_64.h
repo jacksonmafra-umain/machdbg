@@ -5,6 +5,7 @@
 #include <string>
 
 #include <MachBug/api/machbug_api.h>
+#include <MachBug/arch/Arch.h>
 
 // The x86-64 half of the register contract: one thread-state flavor (x86_THREAD_STATE64, flavor
 // 4), one mapping into DbgRegsX86_64, one descriptor table. The arm64 twin is arch/Arm64.h; read
@@ -38,4 +39,16 @@ namespace MachBug::arch::X86_64
     // when it did not.
     bool IsSingleStepTrap(exception_type_t exception, const int64_t* code,
                           uint32_t codeCnt);
+
+    // The four debug address registers DR0-DR3, which is an architectural constant rather than
+    // something to ask the machine about -- unlike arm64, where the slot count varies and the
+    // array width lies. Both counts report the same four because the same four registers serve
+    // execution breakpoints and watchpoints here: they are one pool, and a watchpoint (task 6)
+    // takes a slot an execution breakpoint could otherwise have used.
+    DebugSlotCounts SlotCounts();
+
+    // Writes the execution slots into DR0-DR3 and their DR7 enable and type fields, clearing the
+    // slots `slots` does not describe. The rest of DR7 -- and the TF bit, which lives in rflags
+    // rather than here -- is left as it was.
+    bool ApplyDebugState(mach_port_t thread, const DebugSlots& slots, std::string* error);
 }

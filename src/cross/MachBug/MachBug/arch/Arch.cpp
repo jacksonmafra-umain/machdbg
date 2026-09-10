@@ -118,4 +118,35 @@ namespace MachBug::arch
             return false;
         }
     }
+
+    DebugSlotCounts SlotCounts(const DbgArch arch)
+    {
+        switch(arch)
+        {
+        case DbgArch_Arm64:
+            return Arm64::SlotCounts();
+        case DbgArch_X86_64:
+            return X86_64::SlotCounts();
+        default:
+            // No slots rather than the host's: a caller that allocated against the wrong
+            // machine's count would write registers that do not exist.
+            return {0, 0};
+        }
+    }
+
+    bool ApplyDebugState(const DbgArch arch, const mach_port_t thread, const DebugSlots& slots,
+                         std::string* error)
+    {
+        switch(arch)
+        {
+        case DbgArch_Arm64:
+            return Arm64::ApplyDebugState(thread, slots, error);
+        case DbgArch_X86_64:
+            return X86_64::ApplyDebugState(thread, slots, error);
+        default:
+            if(error)
+                *error = "no debug registers for this architecture in this build";
+            return false;
+        }
+    }
 }

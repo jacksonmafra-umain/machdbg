@@ -31,7 +31,13 @@ namespace
 // Debugger.h for why the loop cannot be shaped like ElfBug's debugLoop()/waitpid().
 namespace MachBug
 {
-    Debugger::Debugger() = default;
+    Debugger::Debugger()
+    {
+        // Hardware breakpoints are written into threads, not into memory, and the table has no
+        // thread list of its own. This is the one wire between them; see Breakpoints::
+        // ThreadSource for why it is a question rather than a list.
+        mBreakpoints.SetThreadSource([this] { return mThreads.Ports(); });
+    }
 
     Debugger::~Debugger()
     {

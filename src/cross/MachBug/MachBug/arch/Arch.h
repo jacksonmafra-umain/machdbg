@@ -4,6 +4,7 @@
 #include <mach/exception_types.h>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include <MachBug/api/machbug_api.h>
 
@@ -59,4 +60,36 @@ namespace MachBug::arch
     // and 1 on x86-64, where the INT3 byte has already executed -- both asserted exactly by
     // tests/breakpoints_software.cpp on their own runners.
     uint32_t PcFixupAfterTrap(DbgArch arch);
+
+    // How many debug slots this machine really has. NOT the width of the kernel's arrays:
+    // arm_debug_state64_t declares __bvr[16]/__wvr[16] on every Apple Silicon machine, and this
+    // one implements six execution breakpoints and four watchpoints. Writing slot 7 writes a
+    // register the CPU does not have.
+    struct DebugSlotCounts
+    {
+        uint32_t exec;
+        uint32_t watch;
+    };
+
+    DebugSlotCounts SlotCounts(DbgArch arch);
+
+    // What one thread's debug registers should hold: `exec[i]` is the address in execution slot
+    // i, and 0 means the slot is empty. Sized by the caller to whatever it wants written; slots
+    // beyond its end are cleared, so one table describes a thread's whole debug state rather
+    // than a patch to it.
+    //
+    // Per thread, not per task -- that is the fact this whole task is shaped around. A hardware
+    // breakpoint is one thread_set_state per live thread, and a thread born afterwards carries
+    // none of them until it is written too.
+    struct DebugSlots
+    {
+        std::vector<uint64_t> exec;
+    };
+
+    // Writes `slots` into one thread, leaving every debug register these slots do not describe
+    // as it was -- single-step lives in the same state on arm64 (MDSCR_EL1) and in the same
+    // register file on x86-64, and clobbering it here would disarm a step the engine is in the
+    // middle of.
+    bool ApplyDebugState(DbgArch arch, mach_port_t thread, const DebugSlots& slots,
+                         std::string* error);
 }

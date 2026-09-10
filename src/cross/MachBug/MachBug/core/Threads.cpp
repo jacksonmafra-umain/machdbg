@@ -109,4 +109,13 @@ namespace MachBug
         mKnown.clear();
         mHaveBaseline = false;
     }
+
+    std::vector<mach_port_t> Threads::Ports() const
+    {
+        std::vector<mach_port_t> ports;
+        ports.reserve(mKnown.size());
+        for(const Entry& entry : mKnown)
+            ports.push_back(entry.port);
+        return ports;
+    }
 }
