@@ -199,7 +199,12 @@ The eight from the brief — `onCreateProcess`, `onExitProcess`, `onSystemBreakp
 - `onLoadModule` / `onUnloadModule`, because dyld notifies through its own mechanism rather than
   through a debug event equivalent to `LOAD_DLL_DEBUG_EVENT`.
 - `onThreadCreate` / `onThreadExit`, because debug registers are per-thread on macOS (§7) and a
-  new thread starts without the process's hardware breakpoints.
+  new thread starts without the process's hardware breakpoints. Milestone 4 measured a second
+  reason the pair has to exist as it does: macOS gives a debugger no thread-lifecycle event at
+  all, so the engine polls `task_threads` at every stop and diffs. Threads are identified by
+  `THREAD_IDENTIFIER_INFO.thread_id`, **not** by port name -- each `task_threads` call mints
+  fresh send rights, so naming threads by port reported a three-thread target as three creations
+  and handed back ids that no longer resolved.
 
 `onException` covers Mach exceptions that are not breakpoints: `EXC_BAD_ACCESS`,
 `EXC_BAD_INSTRUCTION`, `EXC_ARITHMETIC`.
@@ -253,18 +258,72 @@ mutex and condition variable; that queue is what makes `Continue`, `StepInto`, `
 
 ### Stepping and breakpoints
 
-Single-step is the TF bit in `rflags` on x86-64, and the SS bit in `PSTATE` together with
-`mdscr_el1` via `ARM_DEBUG_STATE64` on arm64. Two mechanisms, one `IArchOps` entry.
+Single-step is the TF bit in `rflags` on x86-64, and `MDSCR_EL1` bit 0 via `ARM_DEBUG_STATE64`
+on arm64. Two mechanisms, one `IArchOps` entry.
 
-Software breakpoints are `0xCC` on x86-64 and a 4-byte `BRK #0` at a 4-byte-aligned address on
-arm64. Writing to a code page on arm64 requires `mach_vm_protect` with `VM_PROT_COPY`, otherwise
-the protection change fails on shared pages — the W^X friction the brief warns about. Stepping
-over a breakpoint is the restore, single-step, re-arm cycle.
+**Corrected in milestone 4.** This section said "the SS bit in `PSTATE` together with
+`mdscr_el1`". Nothing in the engine touches `PSTATE`, and stepping works without it: writing
+`MDSCR_EL1` bit 0 is the whole mechanism (`arch/Arm64.cpp`). The kernel manages the `SPSR.SS`
+side of the software-step state machine on the way back to userspace.
+
+Software breakpoints are `0xCC` on x86-64 and a 4-byte `BRK #0` (bytes `00 00 20 d4`) at a
+4-byte-aligned address on arm64 — both verified with the assembler rather than quoted. Writing to
+a code page on arm64 requires `mach_vm_protect` with `VM_PROT_COPY`, otherwise the protection
+change fails on shared pages — the W^X friction the brief warns about. Stepping over a breakpoint
+is the restore, single-step, re-arm cycle, and a hardware breakpoint or watchpoint needs the same
+cycle for the same reason: it faults *before* the instruction runs, so resuming with the slot
+armed traps on the same instruction forever.
 
 Hardware breakpoints use `x86_DEBUG_STATE64` or `ARM_DEBUG_STATE64` with BVR/BCR and WVR/WCR
 pairs, which differ in count, semantics and encoding. The trap: on macOS debug state is
 per-thread, not per-process, so every new thread starts without them. `onThreadCreate` is the
 hook that propagates the state, which is why it is in the API rather than an optional extra.
+
+#### What milestone 4 measured
+
+Written down because every one of these cost a failing run to learn, and because three of them
+contradict what a manual would suggest.
+
+**The exception says less than you would expect.** On arm64 a hardware execution breakpoint and
+a `BRK #0` are indistinguishable at the exception — `EXC_BREAKPOINT`, `code[0] = 0x1`,
+`code[1] = pc` for both (#106). On x86-64 `EXC_BREAKPOINT` carries no distinguishing subcode and
+no address at all (`code[1] = 0`). So breakpoints are classified by **address against the
+engine's own table**, never by exception code, because only the table knows what was set.
+
+A watchpoint is the one case the exception does name. arm64: `code[0] = 0x102`
+(`EXC_ARM_DA_DEBUG`) and `code[1]` is the **data** address, not the program counter (#109).
+x86-64 says nothing, so the slot that fired is read out of `DR6` and what it was watching out of
+`DR7`.
+
+**The program-counter fixup depends on the kind, not only the architecture.** 0 on arm64; on
+x86-64 it is 1 for a software trap, because the `INT3` byte has already executed, and **0 for a
+hardware breakpoint**, because a debug-register hit faults before the instruction runs. Applying
+the software fixup to a hardware hit looks the address up one byte early, matches nothing, and
+reports a hit the engine asked for as an unexplained exception — which is exactly what the first
+Intel run of #106 did.
+
+**Answering a debug exception queues a SIGTRAP behind it.** It arrives afterwards as
+`EXC_SOFTWARE` / `EXC_SOFT_SIGNAL` / `SIGTRAP`, and for a watchpoint it arrives *before* the
+armed step has executed anything — shaped exactly like the completion of a step off a software
+breakpoint. Counting it as the step left the target on the same store forever, program counter
+unmoved. What separates them is the program counter: a step that completed moved it (#109).
+`ptrace(PT_THUPDATE)` suppresses such a signal, and answers `EBUSY` when none is pending — which
+is the state the call wants, not a failure.
+
+**Slot counts come from `sysctl`, never from the array width.** `arm_debug_state64_t` declares
+`__bvr[16]`/`__wvr[16]`; this machine implements 6 execution and 4 watchpoint slots
+(`hw.optional.breakpoint`, `hw.optional.watchpoint`). x86-64 has 4 debug address registers, and
+they serve execution breakpoints and watchpoints **from one pool** — unlike arm64, where BVR and
+WVR are separate files and the two kinds never compete. `GetHwBreakpointSlots` reports the real
+count, because a caller that believes it has 16 offers a seventh hardware breakpoint and then has
+to explain a refusal it cannot account for.
+
+**Watchpoint sizes are the intersection of the two architectures**, deliberately: 1, 2, 4 and 8
+bytes, address aligned to the size. That is what x86-64's `DR7` LEN field can express and what it
+requires; arm64's byte-address-select mask could describe more. A size the hardware cannot encode
+is refused by name rather than rounded up — a three-byte watchpoint widened to four fires on the
+next variable along and reports it as the one the caller asked about. And x86-64 has no read-only
+watchpoint type at all, so a read watchpoint fires on writes there too.
 
 ### Pointer authentication
 
@@ -553,7 +612,7 @@ out of scope. The image's continued availability still needs a fresh check befor
 | 1 | Widgets build and run on macOS under Qt 6; `hex_viewer` and `minidump` launch as `.app` | Screenshots, CI job |
 | 2 | MachBug skeleton: launch, attach, exception loop, stop/resume, signing working | Engine test harness |
 | 3 | Registers and memory read/write, both architectures | Register view populated on a real process — `regview.app`, checked by `regview --selftest` offscreen and by the engine suite on both architectures |
-| 4 | Software and hardware breakpoints, single-step, both architectures | Test targets |
+| 4 | Software and hardware breakpoints, watchpoints, single-step, both architectures | Engine suite on both architectures, plus `regview --selftest-breakpoint` offscreen in CI: a breakpoint set from the bench stops the target at its address |
 | 5 | Mach-O module enumeration via dyld, memory map, thread list | Views populated |
 | 6 | Capstone behind the disassembly interface, both architectures | Disassembly view on native code |
 | 7 | Symbols: nlist plus DWARF/dSYM | Symbol view, source view |
@@ -571,7 +630,7 @@ out of scope. The image's continued availability still needs a fresh check befor
 - The debuggability report answers correctly in all four cases of §9.
 - The read-only fixup inspector displays stub resolution for a loaded module.
 - A Tier 1 plugin compiled from unmodified source loads and runs.
-- x86-64 behaviour is either proven on an Intel CI runner or labelled `unverified`. **Proven for the engine as of milestone 3**: the `macos-15-intel` job builds and runs the whole engine suite as the ordinary user, and reported `All tests passed (468 assertions in 48 test cases)` on x86_64, macOS 15.7.9 (2026-09-09). That covers registers, memory, the exception loop and the attach path; the Qt front end is still built and smoke-launched only on Apple Silicon.
+- x86-64 behaviour is either proven on an Intel CI runner or labelled `unverified`. **Proven for the engine as of milestone 3, and again for milestone 4**: the `macos-15-intel` job builds and runs the whole engine suite as the ordinary user. It reported `All tests passed (468 assertions in 48 test cases)` on x86_64, macOS 15.7.9 (2026-09-09), and `All tests passed (674 assertions in 74 test cases)` after milestone 4 (2026-09-10). That covers registers, memory, the exception loop, the attach path, and now software breakpoints, hardware breakpoints, watchpoints and stepping; the Qt front end is still built, smoke-launched and self-tested only on Apple Silicon.
 - Credits and licences complete.
 
 ## 13. Open research questions
