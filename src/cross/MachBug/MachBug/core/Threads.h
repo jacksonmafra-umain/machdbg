@@ -52,6 +52,11 @@ namespace MachBug
 
         std::vector<uint64_t> Known() const;
 
+        // A port for every live thread, in no particular order. What a hardware breakpoint has
+        // to be written into: debug registers are per-thread, so "set a breakpoint" means this
+        // whole list, not the task.
+        std::vector<mach_port_t> Ports() const;
+
         // Releases every held right and forgets everything, for a Debugger pointed at a new
         // target.
         void Reset();

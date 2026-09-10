@@ -800,7 +800,17 @@ namespace MachBug
 
         const Threads::Change change = mThreads.Refresh(mProcess->task);
         for(const uint64_t threadId : change.appeared)
+        {
+            // Before the callback, not after: a caller told about a new thread may go straight
+            // to reading its state, and the breakpoints this engine promised are part of that
+            // state. A thread born after a hardware breakpoint was set carries none of it until
+            // this write happens.
+            std::string applyError;
+            if(!mBreakpoints.ApplyToThread(kLoopArch, mThreads.PortFor(threadId), &applyError))
+                cbInternalError("could not arm the hardware breakpoints on a new thread: " +
+                                 applyError);
             cbThreadCreate(threadId);
+        }
         for(const uint64_t threadId : change.disappeared)
             cbThreadExit(threadId);
     }

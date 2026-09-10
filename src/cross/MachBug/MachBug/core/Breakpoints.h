@@ -3,12 +3,14 @@
 #include <mach/mach.h>
 
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include <MachBug/api/machbug_api.h>
+#include <MachBug/arch/Arch.h>
 
 namespace MachBug
 {
@@ -27,6 +29,18 @@ namespace MachBug
     class Breakpoints
     {
     public:
+        // How the table reaches the target's threads. Hardware breakpoints do not live in the
+        // target's memory the way software ones do -- they live in per-thread debug registers,
+        // so arming one is a write to every live thread, and the set of live threads changes
+        // while the table stands still. The engine hands the table a way to ask rather than a
+        // list that would go stale between the two.
+        //
+        // Read at the same moments the engine already reads its own thread list: at a stop, or
+        // from a caller that has stopped the target to change a breakpoint.
+        using ThreadSource = std::function<std::vector<mach_port_t>()>;
+
+        void SetThreadSource(ThreadSource source);
+
         struct Entry
         {
             uint64_t address = 0;
@@ -74,12 +88,29 @@ namespace MachBug
         // Puts every enabled breakpoint back. The second half of that cycle.
         bool ArmAll(mach_port_t task, DbgArch arch, std::string* error);
 
+        // Writes the hardware slots into one thread. What a thread that has just appeared needs:
+        // a breakpoint set before it was born is in this table and in no register of its own.
+        bool ApplyToThread(DbgArch arch, mach_port_t thread, std::string* error) const;
+
     private:
-        // Both assume the caller holds mMutex.
+        // All four assume the caller holds mMutex.
         bool armLocked(mach_port_t task, DbgArch arch, Entry& entry, std::string* error);
         bool disarmLocked(mach_port_t task, DbgArch arch, Entry& entry, std::string* error);
 
+        // The lowest execution slot no entry holds, or -1 when the machine has none left. Slots
+        // are kept across a disarm rather than handed back: the resume cycle disarms and re-arms
+        // constantly, and a breakpoint that changed slot each time would be one another thread
+        // could observe as absent.
+        int allocateExecSlotLocked(DbgArch arch) const;
+
+        // Writes what the table currently says into every live thread's debug registers.
+        bool applyHardwareLocked(DbgArch arch, std::string* error) const;
+
+        // The slot table as the hardware wants it, built from the armed entries.
+        arch::DebugSlots hardwareSlotsLocked(DbgArch arch) const;
+
         mutable std::mutex mMutex;
         std::vector<Entry> mEntries;
+        ThreadSource mThreadSource;
     };
 }

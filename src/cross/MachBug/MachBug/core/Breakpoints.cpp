@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <utility>
 
 namespace MachBug
 {
@@ -19,19 +20,124 @@ namespace MachBug
         }
     }
 
+    void Breakpoints::SetThreadSource(ThreadSource source)
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        mThreadSource = std::move(source);
+    }
+
+    int Breakpoints::allocateExecSlotLocked(const DbgArch arch) const
+    {
+        const uint32_t slots = arch::SlotCounts(arch).exec;
+        for(uint32_t slot = 0; slot < slots; ++slot)
+        {
+            const bool taken = std::any_of(mEntries.begin(), mEntries.end(),
+                [slot](const Entry& entry) {
+                    return entry.kind == DbgBreakpointKind_HwExec &&
+                           entry.slot == static_cast<int>(slot);
+                });
+            if(!taken)
+                return static_cast<int>(slot);
+        }
+        return -1;
+    }
+
+    arch::DebugSlots Breakpoints::hardwareSlotsLocked(const DbgArch arch) const
+    {
+        arch::DebugSlots slots;
+        slots.exec.assign(arch::SlotCounts(arch).exec, 0);
+        for(const Entry& entry : mEntries)
+        {
+            if(entry.kind != DbgBreakpointKind_HwExec || !entry.armed || entry.slot < 0)
+                continue;
+            if(static_cast<uint32_t>(entry.slot) < slots.exec.size())
+                slots.exec[static_cast<std::size_t>(entry.slot)] = entry.address;
+        }
+        return slots;
+    }
+
+    bool Breakpoints::applyHardwareLocked(const DbgArch arch, std::string* error) const
+    {
+        if(!mThreadSource)
+        {
+            if(error)
+                *error = "this breakpoint table has no way to reach the target's threads, and a "
+                         "hardware breakpoint is written into threads rather than into memory";
+            return false;
+        }
+
+        const arch::DebugSlots slots = hardwareSlotsLocked(arch);
+        const std::vector<mach_port_t> threads = mThreadSource();
+        if(threads.empty())
+        {
+            if(error)
+                *error = "the target has no threads to write debug registers to";
+            return false;
+        }
+
+        // Every thread is attempted even after one fails, and the first diagnostic is what comes
+        // back. A partial application is still better than stopping halfway: the threads that
+        // took the write do carry the breakpoint, and the ones that did not are named by the
+        // failure rather than silently skipped.
+        bool ok = true;
+        std::string firstError;
+        for(const mach_port_t thread : threads)
+        {
+            std::string threadError;
+            if(!arch::ApplyDebugState(arch, thread, slots, &threadError))
+            {
+                ok = false;
+                if(firstError.empty())
+                    firstError = threadError;
+            }
+        }
+        if(!ok && error)
+            *error = firstError;
+        return ok;
+    }
+
+    bool Breakpoints::ApplyToThread(const DbgArch arch, const mach_port_t thread,
+                                    std::string* error) const
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+
+        // A table with no hardware breakpoints in it does not touch the thread at all. Writing
+        // an all-zero slot table would be harmless in effect and wrong in principle: this engine
+        // would be clearing debug registers it never set, on every thread a target ever creates.
+        const bool anyHardware = std::any_of(mEntries.begin(), mEntries.end(),
+            [](const Entry& entry) { return entry.kind == DbgBreakpointKind_HwExec; });
+        if(!anyHardware)
+            return true;
+
+        return arch::ApplyDebugState(arch, thread, hardwareSlotsLocked(arch), error);
+    }
+
     bool Breakpoints::armLocked(const mach_port_t task, const DbgArch arch, Entry& entry,
                                 std::string* error)
     {
         if(entry.armed)
             return true;
 
-        // Hardware kinds are tasks 5 and 6. Until then they are refused by name rather than
-        // quietly turned into software breakpoints: a caller that asked for hardware asked
-        // precisely for the target's bytes to be left alone.
+        if(entry.kind == DbgBreakpointKind_HwExec)
+        {
+            // Marked armed before the write, because the slot table is built from what the
+            // entries say -- and put back if the write does not happen, so the table never
+            // claims a breakpoint the threads do not carry.
+            entry.armed = true;
+            if(!applyHardwareLocked(arch, error))
+            {
+                entry.armed = false;
+                return false;
+            }
+            return true;
+        }
+
+        // Watchpoints are task 6. Refused by name rather than quietly turned into an execution
+        // breakpoint, which would stop on the wrong event entirely.
         if(entry.kind != DbgBreakpointKind_Software)
         {
             if(error)
-                *error = "hardware breakpoints and watchpoints are not implemented yet";
+                *error = "watchpoints are not implemented yet";
             return false;
         }
 
@@ -65,14 +171,24 @@ namespace MachBug
     bool Breakpoints::disarmLocked(const mach_port_t task, const DbgArch arch, Entry& entry,
                                    std::string* error)
     {
-        (void)arch;
         if(!entry.armed)
             return true;
+
+        if(entry.kind == DbgBreakpointKind_HwExec)
+        {
+            entry.armed = false;
+            if(!applyHardwareLocked(arch, error))
+            {
+                entry.armed = true;
+                return false;
+            }
+            return true;
+        }
 
         if(entry.kind != DbgBreakpointKind_Software)
         {
             if(error)
-                *error = "hardware breakpoints and watchpoints are not implemented yet";
+                *error = "watchpoints are not implemented yet";
             return false;
         }
 
@@ -129,10 +245,31 @@ namespace MachBug
         entry.size = size;
         entry.enabled = true;
 
-        if(!armLocked(task, arch, entry, error))
-            return false;
+        if(kind == DbgBreakpointKind_HwExec)
+        {
+            entry.slot = allocateExecSlotLocked(arch);
+            if(entry.slot < 0)
+            {
+                const uint32_t slots = arch::SlotCounts(arch).exec;
+                if(error)
+                    *error = "cannot set a hardware breakpoint at " + hex(address) + ": this "
+                             "machine has " + std::to_string(slots) + " execution slots and all " +
+                             std::to_string(slots) + " are in use. A hardware breakpoint is not "
+                             "quietly downgraded to a software one, because a caller that asked "
+                             "for hardware asked for the target's bytes to be left alone";
+                return false;
+            }
+        }
 
+        // In the table before it is armed, and taken back out if arming fails. A hardware
+        // breakpoint is written from what the table says, so an entry that arms before it is in
+        // the table arms an empty slot set -- which is exactly nothing, silently.
         mEntries.push_back(std::move(entry));
+        if(!armLocked(task, arch, mEntries.back(), error))
+        {
+            mEntries.pop_back();
+            return false;
+        }
         return true;
     }
 
