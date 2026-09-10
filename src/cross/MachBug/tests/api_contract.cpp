@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cerrno>
 #include <csignal>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -192,11 +193,17 @@ TEST_CASE("every vtable entry is callable and answers honestly about itself")
     char buf[8];
     REQUIRE(vtStatus(engine->ModNameFromAddr(engine->impl, 0, buf, sizeof(buf))) == DbgStatus_NotSupported);
 
+    // NotAttached rather than NotSupported since milestone 4 task 7: these are implemented now,
+    // and what is missing is a target rather than the feature.
     REQUIRE(vtStatus(engine->SetBreakpoint(engine->impl, DbgBreakpointKind_Software, 0, 1)) ==
-            DbgStatus_NotSupported);
-    REQUIRE(vtStatus(engine->DeleteBreakpoint(engine->impl, 0)) == DbgStatus_NotSupported);
+            DbgStatus_NotAttached);
+    REQUIRE(vtStatus(engine->DeleteBreakpoint(engine->impl, 0)) == DbgStatus_NotAttached);
     REQUIRE_FALSE(engine->IsBreakpointEffective(engine->impl, 0));
-    REQUIRE(engine->GetHwBreakpointSlots(engine->impl) == 0);
+
+    // The slot count answers with no target at all: it describes the machine, not the process,
+    // and a UI drawing a breakpoint panel needs it before anything is launched.
+    REQUIRE(engine->GetHwBreakpointSlots(engine->impl) >= 4);
+    REQUIRE(engine->GetHwBreakpointSlots(engine->impl) < 16);
 
     // Nothing was ever launched or attached -- Continue/StepInto/Pause/Stop must say so rather
     // than silently no-op.
@@ -707,6 +714,158 @@ TEST_CASE("the vtable refuses a register read with no stop to read from")
     uint32_t count = 0;
     REQUIRE(engine->GetRegisterDescs(engine->impl, DbgArch_Arm64, &count) != nullptr);
     REQUIRE(count == 34);
+
+    MachBugDestroy(engine);
+}
+
+// Milestone 4 task 7: the breakpoint entries of the same contract. Everything milestone 4 built
+// was reachable only from C++ until these four were filled in, and a Qt view calls nothing else.
+namespace
+{
+    struct BreakpointHarness
+    {
+        std::atomic<bool> stopped{false};
+        std::atomic<bool> startReturned{false};
+        std::atomic<int> hits{0};
+        std::atomic<uint64_t> lastAddress{0};
+    };
+
+    void onBreakpointHarnessSystemBreakpoint(void* userdata)
+    {
+        static_cast<BreakpointHarness*>(userdata)->stopped.store(true, std::memory_order_release);
+    }
+
+    void onBreakpointHarnessBreakpoint(const uint64_t address, void* userdata)
+    {
+        auto* harness = static_cast<BreakpointHarness*>(userdata);
+        harness->lastAddress.store(address, std::memory_order_release);
+        harness->hits.fetch_add(1, std::memory_order_acq_rel);
+    }
+}
+
+TEST_CASE("a breakpoint set through the vtable stops the target and reports its address")
+{
+    BreakpointHarness harness;
+    DbgEngineCallbacks callbacks{};
+    callbacks.onSystemBreakpoint = onBreakpointHarnessSystemBreakpoint;
+    callbacks.onBreakpoint = onBreakpointHarnessBreakpoint;
+    callbacks.userdata = &harness;
+
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+
+    const std::string path = FIXTURE("known_function");
+    DbgLaunchSpec spec{};
+    spec.path = path.c_str();
+
+    // The fixture publishes the address on stdout, so this process's stdout is redirected for
+    // the whole run rather than only around the launch: Start() blocks for the target's life
+    // here, unlike Debugger::Init(). Nothing is asserted while the redirect is in place --
+    // Catch2's own output would land in the capture file and corrupt the line being read.
+    char outPathTemplate[] = "/tmp/machbug_contract_breakpoint.XXXXXX";
+    const int outFd = mkstemp(outPathTemplate);
+    REQUIRE(outFd != -1);
+    const std::string outPath = outPathTemplate;
+
+    const int savedStdout = dup(STDOUT_FILENO);
+    REQUIRE(savedStdout != -1);
+    std::fflush(stdout);
+    const int redirected = dup2(outFd, STDOUT_FILENO);
+
+    std::thread startThread([&] {
+        engine->Start(engine->impl, &spec);
+        harness.startReturned.store(true, std::memory_order_release);
+    });
+
+    for(int i = 0; i < 500 && !harness.stopped.load(std::memory_order_acquire) &&
+                   !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool stopped = harness.stopped.load(std::memory_order_acquire);
+
+    // Resumed so the fixture reaches its printf, then paused again: a breakpoint is written into
+    // a stopped target.
+    engine->Continue(engine->impl);
+
+    uint64_t functionAddress = 0;
+    for(int i = 0; i < 500 && functionAddress == 0; ++i)
+    {
+        if(FILE* captured = std::fopen(outPath.c_str(), "r"))
+        {
+            unsigned long long printed = 0;
+            if(std::fscanf(captured, "%llx", &printed) == 1)
+                functionAddress = printed;
+            std::fclose(captured);
+        }
+        if(functionAddress == 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    std::fflush(stdout);
+    const int restored = dup2(savedStdout, STDOUT_FILENO);
+    close(savedStdout);
+    close(outFd);
+    unlink(outPath.c_str());
+
+    engine->Pause(engine->impl);
+
+    const uint32_t slots = engine->GetHwBreakpointSlots(engine->impl);
+    const DbgStatus setResult =
+        engine->SetBreakpoint(engine->impl, DbgBreakpointKind_Software, functionAddress, 0);
+    const bool effectiveAfterSet = engine->IsBreakpointEffective(engine->impl, functionAddress);
+    const std::string setDiagnostic = DbgLastErrorString();
+
+    engine->Continue(engine->impl);
+    for(int i = 0; i < 500 && harness.hits.load(std::memory_order_acquire) == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const int hits = harness.hits.load(std::memory_order_acquire);
+    const uint64_t reported = harness.lastAddress.load(std::memory_order_acquire);
+
+    const DbgStatus deleteResult = engine->DeleteBreakpoint(engine->impl, functionAddress);
+    const bool effectiveAfterDelete = engine->IsBreakpointEffective(engine->impl, functionAddress);
+    const DbgStatus deleteAgain = engine->DeleteBreakpoint(engine->impl, functionAddress);
+
+    engine->Stop(engine->impl);
+    for(int i = 0; i < 500 && !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if(harness.startReturned.load(std::memory_order_acquire))
+        startThread.join();
+    else
+        startThread.detach();
+
+    INFO("redirect " << redirected << ", restore " << restored << ", fixture function at 0x"
+         << std::hex << functionAddress << ", diagnostic: " << setDiagnostic);
+    REQUIRE(stopped);
+    REQUIRE(functionAddress != 0);
+    REQUIRE(setResult == DbgStatus_Ok);
+    REQUIRE(effectiveAfterSet);
+    REQUIRE(hits >= 1);
+    REQUIRE(reported == functionAddress);
+
+    REQUIRE(deleteResult == DbgStatus_Ok);
+    // Effective means the target is carrying it, so a deleted breakpoint is not effective and a
+    // second delete is an argument error rather than a silent success.
+    REQUIRE_FALSE(effectiveAfterDelete);
+    REQUIRE(deleteAgain == DbgStatus_InvalidArgument);
+
+    // The machine's slots, not the sixteen the kernel's arrays are wide.
+    INFO("hardware execution slots reported: " << slots);
+    REQUIRE(slots >= 4);
+    REQUIRE(slots < 16);
+
+    MachBugDestroy(engine);
+}
+
+TEST_CASE("the breakpoint entries refuse a target that is not there, by name")
+{
+    DbgEngineCallbacks callbacks{};
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+
+    REQUIRE(engine->SetBreakpoint(engine->impl, DbgBreakpointKind_Software, 0x1000, 0) ==
+            DbgStatus_NotAttached);
+    REQUIRE_FALSE(std::string(DbgLastErrorString()).empty());
+    REQUIRE(engine->DeleteBreakpoint(engine->impl, 0x1000) == DbgStatus_NotAttached);
+    REQUIRE_FALSE(engine->IsBreakpointEffective(engine->impl, 0x1000));
 
     MachBugDestroy(engine);
 }

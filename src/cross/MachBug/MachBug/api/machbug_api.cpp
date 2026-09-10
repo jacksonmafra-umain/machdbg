@@ -113,6 +113,12 @@ namespace
                 cb.onStep(cb.userdata);
         }
 
+        void cbBreakpoint(uint64_t address) override
+        {
+            if(cb.onBreakpoint)
+                cb.onBreakpoint(address, cb.userdata);
+        }
+
         void cbThreadCreate(uint64_t threadId) override
         {
             if(cb.onThreadCreate)
@@ -525,25 +531,76 @@ namespace
         return DbgStatus_NotSupported;
     }
 
-    DbgStatus vtSetBreakpoint(void* /*impl*/, DbgBreakpointKind /*kind*/, uint64_t /*addr*/,
-                               uint32_t /*size*/)
+    DbgStatus vtSetBreakpoint(void* impl, const DbgBreakpointKind kind, const uint64_t addr,
+                               const uint32_t size)
     {
-        return DbgStatus_NotSupported;
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before setting a breakpoint";
+            return DbgStatus_NotAttached;
+        }
+
+        std::string error;
+        if(engine->BreakpointTable().Add(engine->GetTaskPort(), vtGetArch(impl), addr, kind, size,
+                                          &error))
+            return DbgStatus_Ok;
+
+        // The table's own refusals reach a C caller through DbgLastErrorString() rather than
+        // being flattened away: "this machine has 6 execution slots and all 6 are in use" and
+        // "the hardware encodes watchpoint sizes of 1, 2, 4 and 8 bytes only" are the difference
+        // between a UI that can tell its user what to do and one that reports a bare failure.
+        tlsLastError = error;
+
+        // An address or size the engine could see was wrong before it touched the target,
+        // against a target that refused the write. A caller retries one of those and not the
+        // other.
+        const bool argumentWasWrong =
+            error.find("alignment") != std::string::npos ||
+            error.find("multiple of the size") != std::string::npos ||
+            error.find("bytes only") != std::string::npos ||
+            error.find("already set at") != std::string::npos;
+        return argumentWasWrong ? DbgStatus_InvalidArgument : DbgStatus_Failed;
     }
 
-    DbgStatus vtDeleteBreakpoint(void* /*impl*/, uint64_t /*addr*/)
+    DbgStatus vtDeleteBreakpoint(void* impl, const uint64_t addr)
     {
-        return DbgStatus_NotSupported;
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before deleting a breakpoint";
+            return DbgStatus_NotAttached;
+        }
+
+        std::string error;
+        if(engine->BreakpointTable().Remove(engine->GetTaskPort(), vtGetArch(impl), addr, &error))
+            return DbgStatus_Ok;
+
+        tlsLastError = error;
+        return error.find("no breakpoint at") != std::string::npos ? DbgStatus_InvalidArgument
+                                                                   : DbgStatus_Failed;
     }
 
-    bool vtIsBreakpointEffective(void* /*impl*/, uint64_t /*addr*/)
+    bool vtIsBreakpointEffective(void* impl, const uint64_t addr)
     {
-        return false;
+        auto* engine = toEngine(impl);
+        if(!engine)
+            return false;
+
+        // Effective means the target is actually carrying it right now -- armed, not merely
+        // remembered. A caller cannot tell those apart from the outside, and only one of them
+        // stops the target.
+        const auto entry = engine->BreakpointTable().Find(addr);
+        return entry.has_value() && entry->armed;
     }
 
-    uint32_t vtGetHwBreakpointSlots(void* /*impl*/)
+    uint32_t vtGetHwBreakpointSlots(void* impl)
     {
-        return 0;
+        // The machine's count, from sysctl on arm64 and from the architecture on x86-64 -- never
+        // the sixteen that arm_debug_state64_t's arrays are wide. A caller that believes it has
+        // sixteen offers a seventh hardware breakpoint and then has to explain a refusal it
+        // cannot account for.
+        return MachBug::arch::SlotCounts(vtGetArch(impl)).exec;
     }
 }
 
