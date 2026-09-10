@@ -542,9 +542,24 @@ namespace MachBug
             if(arch::Read(kLoopArch, thread, &regs, &readError))
             {
                 const uint64_t pc = kLoopArch == DbgArch_Arm64 ? regs.arm64.pc : regs.x86_64.rip;
-                const uint32_t fixup = arch::PcFixupAfterTrap(kLoopArch);
+
+                // Where the program counter is relative to the breakpoint depends on which kind
+                // stopped the target, and the kind is only known once a match is found -- so both
+                // candidates are tried, hardware first. A hardware breakpoint faults *before* the
+                // instruction runs, so the pc is the address itself; a software trap on x86-64 has
+                // already executed its INT3 byte, so the pc is one past it. Applying the software
+                // fixup to a hardware hit looks up an address one byte before the breakpoint,
+                // which matches nothing and reports a hit as an unexplained exception. On arm64
+                // the fixup is zero and the two candidates are the same address.
+                uint32_t fixup = 0;
+                auto entry = mBreakpoints.Find(pc);
+                if(!entry || !entry->armed || entry->kind == DbgBreakpointKind_Software)
+                {
+                    fixup = arch::PcFixupAfterTrap(kLoopArch);
+                    entry = mBreakpoints.Find(pc - fixup);
+                }
+
                 const uint64_t candidate = pc - fixup;
-                const auto entry = mBreakpoints.Find(candidate);
                 if(entry && entry->armed)
                 {
                     hitBreakpoint = candidate;

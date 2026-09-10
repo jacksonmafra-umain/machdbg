@@ -14,6 +14,12 @@
 // both cases. So nothing in the message says which mechanism stopped the target, and the
 // dispatch keeps classifying by address against the breakpoint table -- exactly as it already
 // did for software breakpoints. A predicate written against the codes would have matched both.
+//
+// x86-64 measured on CI, where a hardware hit arrives as `Exception(type=6, code1=0)`: also
+// EXC_BREAKPOINT, and its code[1] carries no address at all. There is nothing to classify by
+// there either. What differs on x86-64 is where the program counter sits: a DR hit faults
+// before the instruction runs, so rip IS the breakpoint, while an INT3 has already executed
+// its byte and rip is one past it. The dispatch tries both candidates for that reason.
 #include <catch2/catch_test_macros.hpp>
 
 #include <mach/mach.h>
