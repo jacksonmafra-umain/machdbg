@@ -581,6 +581,25 @@ namespace
                                                                    : DbgStatus_Failed;
     }
 
+    DbgStatus vtSetBreakpointEnabled(void* impl, const uint64_t addr, const bool enabled)
+    {
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before enabling a breakpoint";
+            return DbgStatus_NotAttached;
+        }
+
+        std::string error;
+        if(engine->BreakpointTable().SetEnabled(engine->GetTaskPort(), vtGetArch(impl), addr,
+                                                 enabled, &error))
+            return DbgStatus_Ok;
+
+        tlsLastError = error;
+        return error.find("no breakpoint at") != std::string::npos ? DbgStatus_InvalidArgument
+                                                                   : DbgStatus_Failed;
+    }
+
     bool vtIsBreakpointEffective(void* impl, const uint64_t addr)
     {
         auto* engine = toEngine(impl);
@@ -639,6 +658,7 @@ extern "C" {
 
         vtable->SetBreakpoint = vtSetBreakpoint;
         vtable->DeleteBreakpoint = vtDeleteBreakpoint;
+        vtable->SetBreakpointEnabled = vtSetBreakpointEnabled;
         vtable->IsBreakpointEffective = vtIsBreakpointEffective;
         vtable->GetHwBreakpointSlots = vtGetHwBreakpointSlots;
 

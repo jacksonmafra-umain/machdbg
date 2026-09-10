@@ -139,6 +139,28 @@ A passing run prints every register row, the memory panel's base and size, and
 the *values*: a table of 34 rows of zeroes is what a view that renders but is never fed looks
 like, and a row count alone would accept it.
 
+### The breakpoint bench
+
+Since milestone 4, `regview` also carries a breakpoint list: an address, a kind (software,
+hardware exec, hardware read, hardware write), a size for the watchpoint kinds, and a state
+column that says whether the *target* is carrying each one rather than whether the list
+remembers it. Double-clicking a row switches it off and on. A stop names the address in the
+status bar, and a watchpoint stop names it as a data address, which is what it is -- the
+program counter at a watchpoint hit belongs to the instruction that made the access.
+
+`--selftest-breakpoint` is the half of that a job can check. It sets a breakpoint on the address
+the fixture publishes, resumes, and exits non-zero unless the target stops there with the list
+showing it armed:
+
+```bash
+QT_QPA_PLATFORM=offscreen ./build/macos-arm64/regview.app/Contents/MacOS/regview \
+    --selftest-breakpoint build/macos-arm64/tests/targets/known_function
+```
+
+It is a separate flag from `--selftest` on purpose: it needs a target that publishes an address,
+and a check that quietly skips itself when pointed at anything else is a check that passes for
+the wrong reason. Both run in CI.
+
 `src/cross/tests/accessibility/regview_accessibility.py` checks the same thing through the native
 accessibility API, which is what a screen reader sees. It currently **fails** -- not because the
 view is empty, but because a table repopulated after its accessible interface exists reads as
