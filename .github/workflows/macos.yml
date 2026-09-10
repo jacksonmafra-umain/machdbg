@@ -71,6 +71,19 @@ jobs:
         timeout-minutes: 3
         run: ./build/macos-arm64/tests/MachBug_tests
 
+      # The view, checked the only way a job can check one. A screenshot proves a populated
+      # register table to a person and nothing here; these two run the whole app offscreen
+      # against a real target and exit non-zero if what the widgets are showing is empty --
+      # or, for the second one, if the target never stops on a breakpoint the bench set.
+      - name: Self-test the views
+        working-directory: src/cross
+        timeout-minutes: 3
+        run: |
+          QT_QPA_PLATFORM=offscreen ./build/macos-arm64/regview.app/Contents/MacOS/regview \
+              --selftest build/macos-arm64/tests/targets/run_endlessly
+          QT_QPA_PLATFORM=offscreen ./build/macos-arm64/regview.app/Contents/MacOS/regview \
+              --selftest-breakpoint build/macos-arm64/tests/targets/known_function
+
       - name: Verify the bundles
         run: ./scripts/check-bundles.sh
 

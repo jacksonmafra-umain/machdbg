@@ -8,9 +8,16 @@
 
 #include <MachBug/api/machbug_api.h>
 
+#include <vector>
+
+#include "BreakpointTable.h"
+
 class Architecture;
 class EngineMemoryPage;
 class HexDump;
+class QComboBox;
+class QLineEdit;
+class QSpinBox;
 class RegisterTable;
 
 // Milestone 3's proof: a real process's registers and memory on screen, driven through the
@@ -39,6 +46,22 @@ public:
     // register row plus the memory line, for a log a failure can be read out of.
     bool selfTest(QStringList* report) const;
 
+    // Milestone 4's half of the same idea, and the only part of the breakpoint bench a job can
+    // check: set a breakpoint on the address the target published, resume, and report whether
+    // the target actually stopped there with the list showing it armed. Drives the Qt event
+    // loop itself, because what is being checked is the view's state after the engine's
+    // callbacks have been delivered -- see main.cpp's polling loop for the same reason.
+    //
+    // Separate from selfTest() rather than folded into it: this needs a target that publishes
+    // an address (known_function), and a check that quietly skips itself when pointed at
+    // anything else is a check that passes for the wrong reason.
+    bool breakpointSelfTest(QStringList* report);
+
+    // Launches with the target's stdout captured to a temporary file, so the address a fixture
+    // publishes can be read back. Only breakpointSelfTest() needs this; an ordinary launch
+    // leaves the target's output where the user can see it.
+    void launchCapturingOutput(const QString& path);
+
 signals:
     // Emitted from the engine's loop thread; every connection to these is queued, which is what
     // moves the work onto the UI thread. Qt cannot marshal what it cannot copy, so these carry
@@ -47,9 +70,14 @@ signals:
     void targetStopped();
     void targetExited(int exitCode);
     void engineError(const QString& error);
+    void breakpointHit(quint64 address);
 
 private slots:
     void onStopped();
+    void onBreakpointHit(quint64 address);
+    void onAddBreakpoint();
+    void onRemoveBreakpoint();
+    void onToggleBreakpoint(uint64_t address);
     void onRegisterEdited(const QString& name, uint64_t value);
     void onContinue();
     void onStepInto();
@@ -61,13 +89,31 @@ private slots:
 private:
     void refreshRegisters();
     void refreshMemory();
+    void refreshBreakpoints();
     void stopEngine();
+    // One place that creates the engine and starts its loop, for launch and attach alike:
+    // `attachPid` of 0 means launch `path`. Two copies of this block drifted apart the moment
+    // milestone 4 added a callback, which is why there is now one.
+    void startEngine(const QString& path, int attachPid, const QString& description);
 
     DbgEngine* mEngine = nullptr;
     std::thread mStartThread;
     std::atomic<bool> mStartReturned{false};
 
     RegisterTable* mRegisters = nullptr;
+    BreakpointTable* mBreakpointList = nullptr;
+    QLineEdit* mBreakpointAddress = nullptr;
+    QComboBox* mBreakpointKind = nullptr;
+    QSpinBox* mBreakpointSize = nullptr;
+
+    // What this window asked the engine for. The vtable has no enumeration -- the caller is the
+    // one that set them -- so this is the list, and the engine is asked per address whether the
+    // target is carrying each one.
+    std::vector<BreakpointTable::Row> mBreakpointRows;
+
+    // The target's stdout, captured for breakpointSelfTest(); empty for an ordinary launch.
+    QString mCapturedOutputPath;
+    int mSavedStdout = -1;
     HexDump* mMemory = nullptr;
     EngineMemoryPage* mMemoryPage = nullptr;
     Architecture* mArchitecture = nullptr;

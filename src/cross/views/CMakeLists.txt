@@ -46,6 +46,8 @@ target_include_directories(machdbg_register_format PUBLIC
 
 # Target: machdbg_views
 set(machdbg_views_SOURCES
+	BreakpointTable.cpp
+	BreakpointTable.h
 	EngineMemoryPage.cpp
 	EngineMemoryPage.h
 	RegisterTable.cpp

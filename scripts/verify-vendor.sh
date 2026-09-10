@@ -88,6 +88,8 @@ required=(
     src/cross/views/RegisterTable.cpp
     src/cross/views/EngineMemoryPage.h
     src/cross/views/EngineMemoryPage.cpp
+    src/cross/views/BreakpointTable.h
+    src/cross/views/BreakpointTable.cpp
     src/cross/regview/main.cpp
     src/cross/regview/MainWindow.h
     src/cross/regview/MainWindow.cpp

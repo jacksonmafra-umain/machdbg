@@ -27,16 +27,39 @@ int main(int argc, char* argv[])
     const auto arguments = app.arguments();
     QString target;
     bool selfTest = false;
+    bool breakpointSelfTest = false;
     for(int i = 1; i < arguments.size(); ++i)
     {
         if(arguments.at(i) == QStringLiteral("--selftest"))
             selfTest = true;
+        else if(arguments.at(i) == QStringLiteral("--selftest-breakpoint"))
+            breakpointSelfTest = true;
         else
             target = arguments.at(i);
     }
 
+    // --selftest-breakpoint needs the target's own stdout, because the fixture publishes the
+    // address the breakpoint goes on. It is its own flag rather than part of --selftest: the
+    // breakpoint half only works against a fixture that publishes one, and a check that skips
+    // itself against any other target is a check that passes for the wrong reason.
     if(!target.isEmpty())
-        w.launch(target);
+    {
+        if(breakpointSelfTest)
+            w.launchCapturingOutput(target);
+        else
+            w.launch(target);
+    }
+
+    if(breakpointSelfTest)
+    {
+        QStringList report;
+        const bool passed = w.breakpointSelfTest(&report);
+        for(const QString& line : report)
+            std::fputs(qPrintable(line + QLatin1Char('\n')), stdout);
+        std::fputs(passed ? "RESULT: the target stopped on a breakpoint set from the bench\n"
+                          : "RESULT: FAILED -- see the lines above\n", stdout);
+        return passed ? 0 : 1;
+    }
 
     if(!selfTest)
         return app.exec();
