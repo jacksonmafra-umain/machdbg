@@ -267,9 +267,13 @@ namespace MachBug::memory
             if(next <= address)   // No forward progress: stop rather than spin.
                 break;
             address = next;
-            // Back to the top of the map for the next address: a depth left over from the
-            // submap just finished would skip whatever the outer map has next.
-            depth = 0;
+
+            // The depth is deliberately NOT reset. MEASURED: resetting it re-enters the submap
+            // that was just descended into at every address, and the walk never finishes --
+            // 99,991 submaps and a hundred thousand repeated regions before a step limit cut it
+            // off, against 8 submaps and 78 regions for the same process once the depth is left
+            // alone. The kernel bumps the reported depth back out on its own as the address
+            // leaves the submap.
         }
         return written;
     }

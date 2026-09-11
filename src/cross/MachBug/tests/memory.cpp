@@ -10,6 +10,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -254,4 +255,31 @@ TEST_CASE("every region carries a readable tag, and tag zero is not called unkno
     REQUIRE(sawUntagged);
     REQUIRE(std::string(MachBug::memory::TagName(0)) == "untagged");
     REQUIRE(std::string(MachBug::memory::TagName(VM_MEMORY_STACK)) == "stack");
+}
+
+TEST_CASE("the region walk finishes, and never reports the same base twice")
+{
+    RecordingDebugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+    debugger.StartOnThread();
+    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+
+    // Deliberately far more room than a process needs, so filling it means the walk did not
+    // finish rather than that the buffer was small. MEASURED: a real process has under a
+    // hundred regions once submaps are walked correctly; the first version of this walk reset
+    // the recursion depth at every address, re-entered the shared cache submap forever, and
+    // produced a hundred thousand repeated regions -- which looked exactly like "a big process"
+    // from the outside.
+    std::vector<MachBug::memory::Region> regions(8192);
+    const uint32_t found = MachBug::memory::EnumRegions(debugger.GetTaskPort(), regions.data(),
+                                                        static_cast<uint32_t>(regions.size()));
+    INFO(found << " regions");
+    REQUIRE(found > 0);
+    REQUIRE(found < regions.size());   // the walk ended on its own, not against the buffer
+
+    std::vector<uint64_t> bases;
+    for(uint32_t i = 0; i < found; ++i)
+        bases.push_back(regions[i].base);
+    std::sort(bases.begin(), bases.end());
+    REQUIRE(std::adjacent_find(bases.begin(), bases.end()) == bases.end());
 }
