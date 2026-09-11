@@ -52,5 +52,33 @@ namespace MachBug
         // debugger asking there -- which is exactly when a startup routine would ask -- gets
         // "nothing yet". The images appear once the target has run.
         static bool Enumerate(mach_port_t task, std::vector<Image>* out, std::string* error);
+
+        struct Change
+        {
+            std::vector<Image> appeared;
+            std::vector<Image> disappeared;
+        };
+
+        // Re-reads the target's images and returns what changed since the previous call, keyed
+        // by load address.
+        //
+        // The first call that finds any images establishes the baseline and reports nothing:
+        // what a target was launched with was not loaded under this engine's watch, and
+        // reporting it would put events that never happened into a caller's list. That is the
+        // same contract core/Threads has, with one difference measured here -- AN EMPTY READ IS
+        // NOT A BASELINE. At the first stop dyld has published nothing yet, and treating that
+        // emptiness as "the target has no modules" would report every library it was launched
+        // with, forty of them, as loads. Empty is the absence of information, not information
+        // about an absence.
+        Change Refresh(mach_port_t task);
+
+        std::vector<Image> Known() const;
+
+        // Forgets everything, for a Debugger pointed at a new target.
+        void Reset();
+
+    private:
+        std::vector<Image> mKnown;
+        bool mHaveBaseline = false;
     };
 }

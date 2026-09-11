@@ -12,6 +12,7 @@
 #include <MachBug/types/MachBug.h>
 #include <MachBug/types/Global.h>
 #include <MachBug/core/Breakpoints.h>
+#include <MachBug/core/Modules.h>
 #include <MachBug/core/Threads.h>
 #include <MachBug/process/Process.h>
 
@@ -179,6 +180,11 @@ namespace MachBug
         // already holding the thing that owns the target.
         Breakpoints& BreakpointTable();
 
+        // How many images the target had loaded at the last stop. Not a live query, for the
+        // same reason ThreadCount() is not: the engine looks when it stops the target, because
+        // that is the only moment it can act on what it sees.
+        std::size_t ModuleCount() const;
+
         // How many threads the target had at the last stop. Not a live query: the engine looks
         // when it stops the target, because that is the only moment it can act on what it sees.
         std::size_t ThreadCount() const;
@@ -257,6 +263,17 @@ namespace MachBug
         // already must for Pause() itself.
         virtual void cbThreadCreate(uint64_t threadId);
         virtual void cbThreadExit(uint64_t threadId);
+
+        // Fired when the engine first sees an image the target did not have at the previous
+        // stop, and when one it knew about is gone. `base` is the address the image is loaded
+        // at, which is what ModBaseFromAddr answers with and what a memory region correlates
+        // against.
+        //
+        // NOT fired for the images a target was launched with: those were not loaded under this
+        // engine's watch. See Modules::Refresh for why an empty first read is not treated as a
+        // baseline, which is the subtlety that decision turns on.
+        virtual void cbLoadModule(uint64_t base, const std::string& path);
+        virtual void cbUnloadModule(uint64_t base);
 
         // Fired from the loop thread when the target stopped on a breakpoint this engine
         // installed. `address` is the breakpoint's own address -- the one the caller asked for,
@@ -349,10 +366,18 @@ namespace MachBug
         // callbacks.
         Threads mThreads;
 
+        // The same, for what dyld has loaded.
+        Modules mModules;
+
         // Looks at the target's thread list and fires cbThreadCreate/cbThreadExit for what
         // changed. Called at every stop this engine creates -- see cbThreadCreate's comment for
         // which thread that leaves the callbacks on.
         void refreshThreads();
+
+        // Looks at the target's image list and fires cbLoadModule/cbUnloadModule for what
+        // changed. Beside refreshThreads() rather than inside it: both happen at every stop,
+        // and a function named for threads should not quietly also do modules.
+        void refreshModules();
 
         // Tells the kernel not to deliver the signal that accompanies a trap this engine caused.
         // See the implementation for the two failures that made it necessary.

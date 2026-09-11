@@ -159,4 +159,60 @@ namespace MachBug
         }
         return true;
     }
+
+    Modules::Change Modules::Refresh(const mach_port_t task)
+    {
+        Change change;
+
+        std::vector<Image> current;
+        if(!Enumerate(task, &current, nullptr))
+            return change;   // unreadable target: nothing changed that this engine can claim
+
+        // See the header: an empty read is dyld not having published yet, which is the state
+        // the very first stop is always in. Taking it as the baseline would turn the target's
+        // whole launch set into load events.
+        if(current.empty())
+            return change;
+
+        if(!mHaveBaseline)
+        {
+            mKnown = std::move(current);
+            mHaveBaseline = true;
+            return change;
+        }
+
+        const auto heldAt = [](const std::vector<Image>& images, const uint64_t address) {
+            for(const Image& image : images)
+            {
+                if(image.loadAddress == address)
+                    return true;
+            }
+            return false;
+        };
+
+        for(const Image& image : current)
+        {
+            if(!heldAt(mKnown, image.loadAddress))
+                change.appeared.push_back(image);
+        }
+        for(const Image& image : mKnown)
+        {
+            if(!heldAt(current, image.loadAddress))
+                change.disappeared.push_back(image);
+        }
+
+        mKnown = std::move(current);
+        return change;
+    }
+
+    std::vector<Modules::Image> Modules::Known() const
+    {
+        return mKnown;
+    }
+
+    void Modules::Reset()
+    {
+        mKnown.clear();
+        mHaveBaseline = false;
+    }
 }

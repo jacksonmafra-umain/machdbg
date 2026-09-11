@@ -144,3 +144,85 @@ TEST_CASE("enumerating without a target is refused rather than answered emptily"
     REQUIRE_FALSE(error.empty());
     REQUIRE(images.empty());
 }
+
+TEST_CASE("a library the target loads is reported, and the ones it started with are not")
+{
+    RecordingDebugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("loads_a_library").c_str()));
+    debugger.StartOnThread();
+    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+
+    // The baseline is taken at the first stop that actually sees images, which is not this one:
+    // at the very first stop dyld has published nothing. Resuming and pausing again is what
+    // establishes it -- and the fixture sleeps 300ms before its dlopen, so this lands before it.
+    debugger.Continue();
+    REQUIRE(debugger.WaitFor(EventType::Resumed));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    debugger.Pause();
+
+    const std::size_t baseline = debugger.ModuleCount();
+    INFO("baseline: " << baseline << " images, "
+         << debugger.count(EventType::LoadModule) << " load events so far");
+    REQUIRE(baseline > 10);
+
+    // The forty-odd libraries the target was launched with are not events: they were not loaded
+    // under this engine's watch. This is the assertion that would fail if an empty first read
+    // were taken as the baseline.
+    REQUIRE(debugger.count(EventType::LoadModule) == 0);
+
+    // Now let the fixture reach its dlopen. No WaitFor(Resumed) here, unlike above: this
+    // Continue is undoing a Pause, and Pause/Continue is synchronous -- task_resume has already
+    // returned by the time Continue does, so the engine fires no event for it (Debugger.h says
+    // so on cbResumed). Waiting for one here hangs for the full timeout and then fails.
+    debugger.Continue();
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    debugger.Pause();
+
+    std::string loadedPath;
+    uint64_t loadedBase = 0;
+    for(const MachBug::test::Event& event : debugger.events())
+    {
+        if(event.type != EventType::LoadModule)
+            continue;
+        if(event.message.find("libcurl") != std::string::npos)
+        {
+            loadedPath = event.message;
+            loadedBase = event.moduleBase;
+        }
+    }
+
+    INFO("after the dlopen: " << debugger.ModuleCount() << " images, "
+         << debugger.count(EventType::LoadModule) << " load events; libcurl at 0x"
+         << std::hex << loadedBase << " (" << loadedPath << ")");
+    REQUIRE_FALSE(loadedPath.empty());
+    REQUIRE(loadedBase > 0x1000);
+    REQUIRE(debugger.ModuleCount() > baseline);
+}
+
+TEST_CASE("a stop with nothing loaded in between reports nothing")
+{
+    RecordingDebugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+    debugger.StartOnThread();
+    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+
+    debugger.Continue();
+    REQUIRE(debugger.WaitFor(EventType::Resumed));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    debugger.Pause();
+    const std::size_t afterBaseline = debugger.count(EventType::LoadModule);
+
+    // Three more stops, with a target that loads nothing. A diff that compared against the
+    // wrong thing, or forgot to store what it saw, reports the whole list again every time --
+    // and a caller building a module list from these events would have it four times over.
+    for(int i = 0; i < 3; ++i)
+    {
+        debugger.Continue();   // undoing a Pause, so no Resumed event -- see the test above
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        debugger.Pause();
+    }
+
+    INFO("load events after the baseline: " << debugger.count(EventType::LoadModule));
+    REQUIRE(debugger.count(EventType::LoadModule) == afterBaseline);
+    REQUIRE(debugger.count(EventType::UnloadModule) == 0);
+}

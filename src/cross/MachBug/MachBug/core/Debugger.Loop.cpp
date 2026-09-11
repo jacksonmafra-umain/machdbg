@@ -476,7 +476,9 @@ namespace MachBug
         // and forgetting it would leave the trap armed with nothing waiting for it.
         // Every stop is a chance to see what the target's thread list has done since the last
         // one -- and the only chance, since nothing notifies a debugger of a thread's birth.
+        // The same is true of its modules, and for the same reason.
         refreshThreads();
+        refreshModules();
 
         bool wasStepCompletion = mStepArmed &&
             arch::IsSingleStepTrap(kLoopArch, exception, code, codeCnt);
@@ -921,10 +923,11 @@ namespace MachBug
         // exception loop never hears about, which is why the call is here as well as there. The
         // callbacks it may fire land on the caller's thread rather than the loop's; see
         // cbThreadCreate's comment in Debugger.h for why that is written down rather than
-        // hidden. Called with mCmdMutex held, which is safe because refreshThreads() touches
-        // only mThreads and the target's port -- it takes no lock of its own and cannot re-enter
-        // anything that takes this one.
+        // hidden. Called with mCmdMutex held, which is safe because neither refresh takes a
+        // lock of its own or re-enters anything that takes this one -- they touch mThreads,
+        // mModules and the target's port.
         refreshThreads();
+        refreshModules();
     }
 
     void Debugger::Stop()
@@ -988,6 +991,23 @@ namespace MachBug
         return mThreads.Known().size();
     }
 
+    void Debugger::refreshModules()
+    {
+        if(!mProcess)
+            return;
+
+        const Modules::Change change = mModules.Refresh(mProcess->task);
+        for(const Modules::Image& image : change.appeared)
+            cbLoadModule(image.loadAddress, image.path);
+        for(const Modules::Image& image : change.disappeared)
+            cbUnloadModule(image.loadAddress);
+    }
+
+    std::size_t Debugger::ModuleCount() const
+    {
+        return mModules.Known().size();
+    }
+
     void Debugger::refreshThreads()
     {
         if(!mProcess)
@@ -1032,6 +1052,8 @@ namespace MachBug
     void Debugger::cbExitProcessEvent(int) {}
     void Debugger::cbSystemBreakpoint() {}
     void Debugger::cbBreakpoint(uint64_t) {}
+    void Debugger::cbLoadModule(uint64_t, const std::string&) {}
+    void Debugger::cbUnloadModule(uint64_t) {}
     void Debugger::cbThreadCreate(uint64_t) {}
     void Debugger::cbThreadExit(uint64_t) {}
     void Debugger::cbResumed() {}
