@@ -71,6 +71,11 @@ private:
     // implementation.
     bool decodeOne(const uint8_t* data, duint size, duint address, cs_insn* insn) const;
 
+    // Fills Instruction_t::branchType and branchDestination. See the implementation for the two
+    // measurements that decide how: the groups do not separate conditional from unconditional,
+    // and BRANCH_RELATIVE does not mean the destination is knowable.
+    void fillBranchInfo(const cs_insn& insn, Instruction_t& inst) const;
+
     // Fills Instruction_t::regsReferenced from cs_regs_access -- see the implementation for the
     // measurement that says it can be.
     void fillRegistersReferenced(const cs_insn& insn, Instruction_t& inst) const;

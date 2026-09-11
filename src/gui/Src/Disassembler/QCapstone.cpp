@@ -8,6 +8,9 @@
 #include <Utils/CodeFolding.h>
 #include <Bridge.h>
 
+#include <capstone/arm64.h>
+#include <capstone/x86.h>
+
 namespace
 {
     // What a failed decode costs the walk. QZydis uses 2 with the reasoning in a comment: FF FE
@@ -99,6 +102,7 @@ Instruction_t QCapstone::DisassembleAt(const uint8_t* data, const duint size,
         inst.instStr = QString("%1 %2").arg(mScratch->mnemonic, mScratch->op_str).trimmed();
         mTokenizer.TokenizeInstruction(handle(), *mScratch, inst.tokens);
         fillRegistersReferenced(*mScratch, inst);
+        fillBranchInfo(*mScratch, inst);
     }
     else
     {
@@ -128,6 +132,79 @@ Instruction_t QCapstone::DisassembleAt(const uint8_t* data, const duint size,
     // Said here rather than left for someone to discover a field nobody fills.
 
     return inst;
+}
+
+void QCapstone::fillBranchInfo(const cs_insn& insn, Instruction_t& inst) const
+{
+    inst.branchType = Instruction_t::None;
+    inst.branchDestination = 0;
+
+    if(insn.detail == nullptr)
+        return;
+
+    bool isJump = false;
+    bool isCall = false;
+    for(uint8_t i = 0; i < insn.detail->groups_count; i++)
+    {
+        if(insn.detail->groups[i] == CS_GRP_JUMP)
+            isJump = true;
+        else if(insn.detail->groups[i] == CS_GRP_CALL)
+            isCall = true;
+    }
+
+    if(!isJump && !isCall)
+        return;
+
+    const bool arm64 = mArchitecture != nullptr &&
+                       mArchitecture->cpu() == Architecture::Cpu::Arm64;
+
+    // MEASURED, and neither of these follows from the group list:
+    //
+    //   arm64: b.eq and b carry IDENTICAL groups ([JUMP, BRANCH_RELATIVE]). What separates them
+    //          is cs_arm64.cc -- 1 for b.eq, 0 (ARM64_CC_INVALID) for b and br.
+    //   x86:   je and jmp also carry identical groups. What separates them is the instruction
+    //          id: X86_INS_JMP is the unconditional one.
+    //
+    // So the condition is read from a field rather than from the mnemonic's spelling, which
+    // would have worked until the first instruction someone spells differently.
+    bool conditional = false;
+    if(arm64)
+    {
+        const arm64_cc cc = insn.detail->arm64.cc;
+        conditional = cc != ARM64_CC_INVALID && cc != ARM64_CC_AL && cc != ARM64_CC_NV;
+    }
+    else
+    {
+        conditional = insn.id != X86_INS_JMP;
+    }
+
+    if(isCall)
+        inst.branchType = Instruction_t::Call;
+    else
+        inst.branchType = conditional ? Instruction_t::Conditional : Instruction_t::Unconditional;
+
+    // MEASURED, and the reason the destination is NOT read from CS_GRP_BRANCH_RELATIVE: `blr x1`
+    // -- an indirect call through a register -- reports that group too. The group says the
+    // encoding form, not that a destination is knowable. The operand type is what says it: an
+    // immediate operand is an address, a register operand is a value this engine cannot know
+    // without running the target.
+    if(arm64)
+    {
+        const cs_arm64& detail = insn.detail->arm64;
+        if(detail.op_count > 0 && detail.operands[0].type == ARM64_OP_IMM)
+            inst.branchDestination = static_cast<duint>(detail.operands[0].imm);
+    }
+    else
+    {
+        const cs_x86& detail = insn.detail->x86;
+        if(detail.op_count > 0 && detail.operands[0].type == X86_OP_IMM)
+            inst.branchDestination = static_cast<duint>(detail.operands[0].imm);
+    }
+
+    // Indirect branches keep a destination of 0. Not a placeholder for something better later:
+    // `br xN` and `blr xN` are everywhere in Apple code -- jump tables, stubs, Objective-C
+    // dispatch -- and the target is a register value. Reporting a number here would be an
+    // answer, which is worse than a gap the spec already documents.
 }
 
 void QCapstone::fillRegistersReferenced(const cs_insn& insn, Instruction_t& inst) const

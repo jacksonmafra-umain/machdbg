@@ -368,6 +368,21 @@ GPLv2-only, which is incompatible with a GPLv3 project. The remaining candidates
 it parses AArch64, LLVM MC used purely as an assembler, or invoking the Clang integrated
 assembler.
 
+#### What milestone 6 measured about branches
+
+Written down because two of these contradict what the group list appears to promise, and each
+was found by printing what Capstone actually reports rather than by reading about it.
+
+- **`CS_GRP_BRANCH_RELATIVE` does not mean the destination is knowable.** `blr x1` -- an
+  indirect call through a register -- carries it. The destination is read from the operand
+  type instead: an immediate operand is an address, a register operand is a value no
+  disassembler can resolve.
+- **The groups do not separate conditional from unconditional.** `b.eq` and `b` carry
+  identical groups, and so do `je` and `jmp`. What separates them is a field: `cs_arm64.cc`
+  (1 for `b.eq`, `ARM64_CC_INVALID` for `b` and `br`) on arm64, and the instruction id
+  (`X86_INS_JMP`) on x86-64.
+- `ret` carries `CS_GRP_RET` on both and no destination, which is what it should be.
+
 ### Analysis on arm64
 
 New prologue and epilogue heuristics (`stp x29, x30, [sp, #-N]!`, `pacibsp`, `retab`), no SEH,
