@@ -99,6 +99,12 @@ required=(
     src/cross/views/EngineMemoryPage.cpp
     src/cross/views/BreakpointTable.h
     src/cross/views/BreakpointTable.cpp
+    src/cross/views/ModuleTable.h
+    src/cross/views/ModuleTable.cpp
+    src/cross/views/MemoryMapTable.h
+    src/cross/views/MemoryMapTable.cpp
+    src/cross/views/ThreadTable.h
+    src/cross/views/ThreadTable.cpp
     src/cross/regview/main.cpp
     src/cross/regview/MainWindow.h
     src/cross/regview/MainWindow.cpp

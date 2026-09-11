@@ -70,7 +70,13 @@ int main(int argc, char* argv[])
     // on with a signal because what is being checked is the *view's* state after the engine's
     // callbacks have been delivered and the widgets have been filled, which is a UI-thread
     // outcome; a five-second budget is far longer than a fixture takes to reach its first stop.
+    // Resumed once before anything is asserted. Milestone 5's tables cannot be populated at the
+    // target's first stop -- dyld has published no image list there -- so a self-test that
+    // asked at that stop would be asserting something the engine cannot truthfully answer.
     QStringList report;
+    if(!w.letTheTargetRun())
+        report.append(QStringLiteral("the target never reached a stop this app could resume"));
+
     bool passed = false;
     for(int attempt = 0; attempt < 100 && !passed; ++attempt)
     {
@@ -83,7 +89,8 @@ int main(int argc, char* argv[])
 
     for(const QString& line : report)
         std::fputs(qPrintable(line + QLatin1Char('\n')), stdout);
-    std::fputs(passed ? "RESULT: the register table and the memory panel are populated\n"
+    std::fputs(passed ? "RESULT: registers, memory, modules, the memory map and threads are "
+                        "all populated\n"
                       : "RESULT: FAILED -- see the rows above\n", stdout);
     return passed ? 0 : 1;
 }

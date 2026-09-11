@@ -10,6 +10,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -254,4 +255,67 @@ TEST_CASE("every region carries a readable tag, and tag zero is not called unkno
     REQUIRE(sawUntagged);
     REQUIRE(std::string(MachBug::memory::TagName(0)) == "untagged");
     REQUIRE(std::string(MachBug::memory::TagName(VM_MEMORY_STACK)) == "stack");
+}
+
+TEST_CASE("the region walk finishes, and never reports the same base twice")
+{
+    RecordingDebugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+    debugger.StartOnThread();
+    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+
+    // Deliberately far more room than a process needs, so filling it means the walk did not
+    // finish rather than that the buffer was small. MEASURED: a real process has under a
+    // hundred regions once submaps are walked correctly; the first version of this walk reset
+    // the recursion depth at every address, re-entered the shared cache submap forever, and
+    // produced a hundred thousand repeated regions -- which looked exactly like "a big process"
+    // from the outside.
+    std::vector<MachBug::memory::Region> regions(8192);
+    const uint32_t found = MachBug::memory::EnumRegions(debugger.GetTaskPort(), regions.data(),
+                                                        static_cast<uint32_t>(regions.size()));
+    INFO(found << " regions");
+    REQUIRE(found > 0);
+    REQUIRE(found < regions.size());   // the walk ended on its own, not against the buffer
+
+    std::vector<uint64_t> bases;
+    for(uint32_t i = 0; i < found; ++i)
+        bases.push_back(regions[i].base);
+    std::sort(bases.begin(), bases.end());
+    REQUIRE(std::adjacent_find(bases.begin(), bases.end()) == bases.end());
+}
+
+TEST_CASE("the region reported for an address contains it, and can be read at its base")
+{
+    RecordingDebugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+    debugger.StartOnThread();
+    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+
+    // The program counter at the first stop is inside dyld, which lives in the shared cache --
+    // a submap. That is the case this test exists for: mach_vm_region_recurse overwrites the
+    // address it is given with the start of whatever it found, so a descent that reuses that
+    // value asks about the submap's first byte instead of the caller's address. It came back
+    // with a region at 0x180000000 whose protection was 0 and whose base could not be read,
+    // for an address that was perfectly readable.
+    DbgRegisters regs{};
+    std::string error;
+    REQUIRE(MachBug::arch::Read(kHostArch, debugger.ResolveThread(0), &regs, &error));
+    const uint64_t pc = programCounterOf(regs);
+    REQUIRE(pc > 0x1000);
+
+    uint8_t byte = 0;
+    REQUIRE(MachBug::memory::Read(debugger.GetTaskPort(), pc, &byte, 1, &error));
+
+    MachBug::memory::Region region{};
+    REQUIRE(MachBug::memory::RegionOf(debugger.GetTaskPort(), pc, &region, &error));
+    INFO("pc 0x" << std::hex << pc << " is in 0x" << region.base << "+0x" << region.size
+         << " prot " << std::dec << region.protection << " depth " << region.depth);
+
+    REQUIRE(pc >= region.base);
+    REQUIRE(pc < region.base + region.size);
+    // Executable, because the program counter is in it -- a region with no protection at all is
+    // a reservation rather than a mapping, and reporting one as "the region containing this
+    // address" is what sent a memory panel to an address it could not read.
+    REQUIRE(region.protection != 0);
+    REQUIRE(MachBug::memory::Read(debugger.GetTaskPort(), region.base, &byte, 1, &error));
 }
