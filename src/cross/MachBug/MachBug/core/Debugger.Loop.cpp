@@ -19,6 +19,8 @@
 #include <csignal>
 #include <cerrno>
 #include <cstring>
+#include <cstdio>
+#include <cstdlib>
 
 // ARM_THREAD_STATE64 / x86_THREAD_STATE64 (see kExceptionPortStateFlavor, below) already reach
 // this file transitively through <mach/thread_status.h> -> <mach/machine/thread_status.h> ->
@@ -480,6 +482,13 @@ namespace MachBug
         refreshThreads();
         refreshModules();
 
+        if(getenv("MACHBUG_TRACE_SIGNALS") != nullptr && exception == EXC_SOFTWARE && codeCnt >= 2)
+        {
+            std::fprintf(stderr, "SIGNALTRACE code0=0x%llx signal=%lld seenFirstStop=%d\n",
+                         (unsigned long long)code[0], (long long)code[1], (int)mSeenFirstStop);
+            std::fflush(stderr);
+        }
+
         bool wasStepCompletion = mStepArmed &&
             arch::IsSingleStepTrap(kLoopArch, exception, code, codeCnt);
 
@@ -582,11 +591,30 @@ namespace MachBug
         // routes an ordinary BSD signal through this port instead of delivering it directly;
         // code[1] carries the signal number. The very first exception this loop ever sees is
         // deliberately treated as the target's first stop regardless of what kind it is (see the
-        // !mSeenFirstStop branch, below) -- in practice that first one always is this case, since
-        // it is the SIGCONT Start() sends to undo POSIX_SPAWN_START_SUSPENDED, turned into an
-        // exception by the same PT_ATTACHEXC. A *second* SIGCONT has also been observed arriving
-        // later (roughly one run in ten), and unlike the first one, nothing in this milestone's
-        // contract gives a caller any way to have asked to be notified of it -- routing it to
+        // !mSeenFirstStop branch, below), and that generality turned out to be load-bearing
+        // rather than defensive.
+        //
+        // MEASURED over 60 launches, which settles issue #64 -- it had argued the SIGSTOP
+        // ptrace(2) attributes to PT_ATTACHEXC was theoretical:
+        //
+        //     47 runs: SIGCONT (19) arrives first and is the only signal of the handshake
+        //     13 runs: SIGSTOP (17) arrives first and becomes the first stop, then the SIGCONT
+        //              arrives and is absorbed here
+        //
+        // So about one launch in five does start with a SIGSTOP. Two earlier claims in this
+        // comment were wrong and are corrected rather than quietly rewritten: that the first
+        // exception is always the SIGCONT, and that "a second SIGCONT arrives roughly one run in
+        // ten". There is never a second SIGCONT. There is one, and in those runs it is the
+        // *second exception* because a SIGSTOP preceded it -- which is what the earlier
+        // observation was actually seeing without logging the signal number.
+        //
+        // Nothing had to change: whichever of the two arrives first is taken as the first stop
+        // and the other is absorbed below, which is why no run has ever reported a stray
+        // exception during the handshake. The order is causal rather than lucky, since Start()
+        // attaches before it resumes.
+        //
+        // Absorbing the later one matters because nothing in this contract gives a caller any
+        // way to have asked to be notified of it -- routing it to
         // cbException() and parking the way a real debug exception parks left the reporting
         // thread waiting for a Continue() call nobody knew to make, IsStopped() still reporting
         // false throughout, and the target hung forever with the reply withheld.
