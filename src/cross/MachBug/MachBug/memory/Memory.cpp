@@ -186,7 +186,55 @@ namespace MachBug::memory
         }
         if(!guard(task, 1, error))
             return false;
-        return regionAt(task, address, out, false, error);
+
+        // Recursive, like the enumeration, and MEASURED to matter: mach_vm_region reports the
+        // whole dyld shared cache as ONE region of 0x72000000 bytes starting at 0x180000000,
+        // whose base is not backed by anything. Any address in any system library falls inside
+        // it, so a caller pointing a memory panel at "the region containing the program
+        // counter" got a 1.8 GB region it could not read a single byte of -- which is exactly
+        // what the view self-test caught, reported as "invalid address".
+        mach_vm_address_t base = address;
+        mach_vm_size_t size = 0;
+        natural_t depth = 0;
+        for(;;)
+        {
+            // Asked about the SAME address every time. mach_vm_region_recurse overwrites the
+            // address it is given with the start of whatever it found, so descending with the
+            // value it left behind asks about the submap's first byte instead of the caller's
+            // address -- which answered with an unrelated, unbacked region of the shared cache
+            // (0x180000000, protection 0) while the address the caller asked about was perfectly
+            // readable. Measured while chasing exactly that.
+            base = address;
+
+            vm_region_submap_info_data_64_t info{};
+            mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
+            const kern_return_t kr = mach_vm_region_recurse(task, &base, &size, &depth,
+                reinterpret_cast<vm_region_recurse_info_t>(&info), &count);
+            if(kr != KERN_SUCCESS)
+            {
+                if(error)
+                    *error = "no mapped region at or above " + hex(address) + ": " +
+                             mach_error_string(kr);
+                return false;
+            }
+
+            // Descend until the region is a real mapping rather than a map of mappings.
+            if(info.is_submap)
+            {
+                ++depth;
+                continue;
+            }
+
+            out->base = base;
+            out->size = size;
+            out->protection = static_cast<uint32_t>(info.protection);
+            out->maxProtection = static_cast<uint32_t>(info.max_protection);
+            out->userTag = info.user_tag;
+            out->depth = depth;
+            out->isSubmap = false;
+            out->tagName = TagName(info.user_tag);
+            return true;
+        }
     }
 
     const char* TagName(const uint32_t tag)
