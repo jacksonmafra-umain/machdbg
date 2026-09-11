@@ -19,10 +19,12 @@ shallow = true
 
 [target.machdbg_disasm_tests]
 type = "executable"
-sources = ["capstone_available.cpp"]
+sources = ["capstone_available.cpp", "decoding.cpp"]
 compile-features = ["cxx_std_17"]
 # ../../widgets for CapstoneVersion.h, which is where the port's own headers live.
-include-directories = ["../../widgets"]
+# ../../widgets for CapstoneVersion.h and the port's own headers; ../../../gui/Src for
+# the disassembler itself.
+include-directories = ["../../widgets", "../../../gui/Src"]
 link-libraries = ["x64dbg_widgets", "Catch2::Catch2WithMain"]
 properties.RUNTIME_OUTPUT_DIRECTORY = "${CMAKE_BINARY_DIR}/tests/disasm"
 cmake-after = """

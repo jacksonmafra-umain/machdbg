@@ -109,6 +109,7 @@ required=(
     src/cross/tests/disasm/cmake.toml
     src/cross/tests/disasm/CMakeLists.txt
     src/cross/tests/disasm/capstone_available.cpp
+    src/cross/tests/disasm/decoding.cpp
     src/cross/regview/main.cpp
     src/cross/regview/MainWindow.h
     src/cross/regview/MainWindow.cpp

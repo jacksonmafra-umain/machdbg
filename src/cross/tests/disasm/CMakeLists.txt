@@ -44,6 +44,7 @@ FetchContent_MakeAvailable(Catch2)
 set(machdbg_disasm_tests_SOURCES
 	capstone_available.cpp
 	cmake.toml
+	decoding.cpp
 )
 
 add_executable(machdbg_disasm_tests)
@@ -57,6 +58,7 @@ target_compile_features(machdbg_disasm_tests PRIVATE
 
 target_include_directories(machdbg_disasm_tests PRIVATE
 	"../../widgets"
+	"../../../gui/Src"
 )
 
 target_link_libraries(machdbg_disasm_tests PRIVATE
