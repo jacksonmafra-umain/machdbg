@@ -134,6 +134,25 @@ typedef struct
 
 typedef struct
 {
+    uint64_t base;          /* where the image is loaded */
+    uint64_t size;          /* the sum of its segments' vm sizes */
+
+    /* What the image moved by: base minus the __TEXT address it was linked at. A link-time
+       address plus this is a runtime one, which is the only reason a module list is worth
+       having. */
+    uint64_t slide;
+
+    uint8_t uuid[16];
+    bool hasUuid;
+
+    /* Inline, so nothing has to be freed. A path can name a file that does not exist: system
+       dylibs live in the dyld shared cache, and /usr/lib/libSystem.B.dylib is loaded in every
+       process while no such file is on disk. */
+    char path[1024];
+} DbgModule;
+
+typedef struct
+{
     uint64_t id;            /* the stable system thread id, what GetRegisters' threadId means */
     uint64_t pc;            /* the program counter, pointer-authentication stripped on arm64 */
     uint32_t runState;      /* TH_STATE_* as the kernel reports it */
@@ -228,6 +247,15 @@ typedef struct DbgEngine
        uses, and for the same reason: the engine does not own a buffer on the caller's behalf. */
     DbgStatus (*ThreadEnum)(void* impl, DbgThread* out, uint32_t capacity, uint32_t* count);
 
+    /* Fills up to `capacity` modules and writes how many exist through `count`. Empty at the
+       target's first stop, which is not a failure: dyld publishes its image list as it goes and
+       that stop happens before any of it exists. */
+    DbgStatus (*ModEnum)(void* impl, DbgModule* out, uint32_t capacity, uint32_t* count);
+
+    /* The load address of the module containing `addr`. DbgStatus_InvalidArgument, with a
+       diagnostic, for an address in no module -- which is most of an address space: the stack,
+       the heap and every anonymous mapping. Never the nearest module below it; answering "your
+       stack is in libSystem" would be a lie of the most convincing kind. */
     DbgStatus (*ModBaseFromAddr)(void* impl, uint64_t addr, uint64_t* base);
     DbgStatus (*ModNameFromAddr)(void* impl, uint64_t addr, char* buf, uint64_t bufSize);
 

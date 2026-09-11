@@ -38,6 +38,8 @@
 #include <MachBug/core/Debugger.h>
 #include <MachBug/core/Modules.h>
 #include <MachBug/core/Threads.h>
+#include <MachBug/macho/Image.h>
+#include <MachBug/macho/Reader.h>
 #include <MachBug/memory/Memory.h>
 
 #include <mach/vm_prot.h>
@@ -139,13 +141,25 @@ namespace
                 cb.onException(type, address, cb.userdata);
         }
 
-        // onPaused, onDebugString, onLoadModule and onUnloadModule have no MachBug::Debugger
-        // event to wire them to yet: modules are milestone 5, and Debugger::Pause()
-        // (unlike ElfBug's Pause(), which surfaces through the waitpid loop that already exists
-        // there) task_suspend()s the target directly with nothing in this milestone's loop to
-        // notice and report it from. Left unfired here rather than fired with fabricated
-        // arguments; a caller relying on any of them before its milestone lands would be relying
-        // on a callback this contract never promised silently to invoke.
+        void cbLoadModule(const uint64_t base, const std::string& path) override
+        {
+            if(cb.onLoadModule)
+                cb.onLoadModule(base, path.c_str(), cb.userdata);
+        }
+
+        void cbUnloadModule(const uint64_t base) override
+        {
+            if(cb.onUnloadModule)
+                cb.onUnloadModule(base, cb.userdata);
+        }
+
+        // onPaused and onDebugString have no MachBug::Debugger event to wire them to yet:
+        // Debugger::Pause() (unlike ElfBug's Pause(), which surfaces through the waitpid loop
+        // that already exists there) task_suspend()s the target directly with nothing in the
+        // loop to notice and report it from, and nothing produces debug strings. Left unfired
+        // rather than fired with fabricated arguments; a caller relying on either before its
+        // milestone lands would be relying on a callback this contract never promised silently
+        // to invoke.
     };
 
     MachBugEngine* toEngine(void* impl)
@@ -600,15 +614,132 @@ namespace
         return DbgStatus_Ok;
     }
 
-    DbgStatus vtModBaseFromAddr(void* /*impl*/, uint64_t /*addr*/, uint64_t* /*base*/)
+    // The image containing `addr`, or nothing. Shared by the three module entries so they
+    // cannot disagree about what "containing" means -- and so that none of them grows a
+    // nearest-below fallback on its own.
+    const MachBug::Modules::Image* moduleContaining(
+        const std::vector<MachBug::Modules::Image>& modules, const uint64_t addr)
     {
-        return DbgStatus_NotSupported;
+        for(const MachBug::Modules::Image& image : modules)
+        {
+            if(image.size != 0 && addr >= image.loadAddress &&
+               addr < image.loadAddress + image.size)
+            {
+                return &image;
+            }
+        }
+        return nullptr;
     }
 
-    DbgStatus vtModNameFromAddr(void* /*impl*/, uint64_t /*addr*/, char* /*buf*/,
-                                 uint64_t /*bufSize*/)
+    DbgStatus vtModEnum(void* impl, DbgModule* out, const uint32_t capacity, uint32_t* count)
     {
-        return DbgStatus_NotSupported;
+        if(count)
+            *count = 0;
+
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before enumerating modules";
+            return DbgStatus_NotAttached;
+        }
+        if(out == nullptr || capacity == 0)
+        {
+            tlsLastError = "no room to write modules into";
+            return DbgStatus_InvalidArgument;
+        }
+
+        const std::vector<MachBug::Modules::Image> modules = engine->LoadedModules();
+        uint32_t written = 0;
+        for(const MachBug::Modules::Image& image : modules)
+        {
+            if(written == capacity)
+                break;
+
+            DbgModule entry{};
+            entry.base = image.loadAddress;
+            entry.size = image.size;
+            entry.slide = image.slide;
+            std::snprintf(entry.path, sizeof(entry.path), "%s", image.path.c_str());
+
+            // The UUID comes from the image itself rather than from dyld, which does not report
+            // one: it is what a dSYM is matched by in milestone 7, so it is read now while the
+            // parser is already being pointed at every image.
+            MachBug::macho::MemoryReader reader(engine->GetTaskPort());
+            MachBug::macho::Image parsed;
+            if(MachBug::macho::Parse(reader, image.loadAddress, &parsed, nullptr) &&
+               parsed.hasUuid)
+            {
+                std::memcpy(entry.uuid, parsed.uuid, sizeof(entry.uuid));
+                entry.hasUuid = true;
+            }
+
+            out[written++] = entry;
+        }
+
+        if(count)
+            *count = written;
+        return DbgStatus_Ok;
+    }
+
+    DbgStatus vtModBaseFromAddr(void* impl, const uint64_t addr, uint64_t* base)
+    {
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before asking about an address";
+            return DbgStatus_NotAttached;
+        }
+        if(base == nullptr)
+        {
+            tlsLastError = "nowhere to write the module base";
+            return DbgStatus_InvalidArgument;
+        }
+
+        const std::vector<MachBug::Modules::Image> modules = engine->LoadedModules();
+        const MachBug::Modules::Image* const image = moduleContaining(modules, addr);
+        if(image == nullptr)
+        {
+            *base = 0;
+            tlsLastError = "no module contains that address -- most of an address space belongs "
+                           "to none of them, and the nearest module below it is not an answer";
+            return DbgStatus_InvalidArgument;
+        }
+
+        *base = image->loadAddress;
+        return DbgStatus_Ok;
+    }
+
+    DbgStatus vtModNameFromAddr(void* impl, const uint64_t addr, char* buf, const uint64_t bufSize)
+    {
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before asking about an address";
+            return DbgStatus_NotAttached;
+        }
+        if(buf == nullptr || bufSize == 0)
+        {
+            tlsLastError = "no room to write the module name into";
+            return DbgStatus_InvalidArgument;
+        }
+
+        const std::vector<MachBug::Modules::Image> modules = engine->LoadedModules();
+        const MachBug::Modules::Image* const image = moduleContaining(modules, addr);
+        if(image == nullptr)
+        {
+            buf[0] = '\0';
+            tlsLastError = "no module contains that address";
+            return DbgStatus_InvalidArgument;
+        }
+
+        // The last path component: a module list shows libSystem.B.dylib, not a column of
+        // identical directory prefixes. The full path is in DbgModule::path for a caller that
+        // wants it.
+        const std::size_t slash = image->path.find_last_of('/');
+        const std::string name = slash == std::string::npos ? image->path
+                                                            : image->path.substr(slash + 1);
+        std::snprintf(buf, static_cast<std::size_t>(bufSize), "%s", name.c_str());
+        return DbgStatus_Ok;
     }
 
     DbgStatus vtSetBreakpoint(void* impl, const DbgBreakpointKind kind, const uint64_t addr,
@@ -734,6 +865,7 @@ extern "C" {
         vtable->MemEnumRegions = vtMemEnumRegions;
 
         vtable->ThreadEnum = vtThreadEnum;
+        vtable->ModEnum = vtModEnum;
         vtable->ModBaseFromAddr = vtModBaseFromAddr;
         vtable->ModNameFromAddr = vtModNameFromAddr;
 
