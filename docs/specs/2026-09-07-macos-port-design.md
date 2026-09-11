@@ -402,6 +402,15 @@ the `__TEXT` segment's `vmaddr`. Live load and unload events come from the `noti
 function pointer in the same structure: an internal breakpoint there is what fires
 `onLoadModule` and `onUnloadModule` from §5.
 
+**Amended in milestone 5, and deliberately not implemented that way yet.** Those callbacks are
+fired by polling this array at every stop and diffing it, the way thread tracking does, because
+the reason is the same: macOS notifies a debugger of neither event. The notification breakpoint
+remains the right answer for events while the target is *running*, and nothing in this engine
+needs those yet -- a debugger acts at stops. It is deferred rather than rejected because an
+internal breakpoint the user never set has to stay invisible in the breakpoint list, invisible in
+the hardware slot count, and restored around every detach, which is a cost worth paying only
+when something needs what it buys.
+
 Load commands that matter: `LC_SEGMENT_64`, `LC_SYMTAB`, `LC_DYSYMTAB`, `LC_UUID`,
 `LC_LOAD_DYLIB`, `LC_MAIN`, `LC_DYLD_CHAINED_FIXUPS` (or the legacy `LC_DYLD_INFO_ONLY`), and
 `LC_FUNCTION_STARTS`.
@@ -432,6 +441,53 @@ modules.
 `task_threads` for enumeration, `thread_info(THREAD_BASIC_INFO)` for state,
 `THREAD_IDENTIFIER_INFO` for the thread id, and `THREAD_EXTENDED_INFO` for `pth_name` — thread
 names cannot be read cross-process through `pthread_getname_np`.
+
+#### What milestone 5 measured
+
+Each of these cost a failing run or a wrong answer to learn, and two of them contradict what the
+API documentation implies.
+
+**System dylibs have no file on disk.** `/usr/lib/libc++.1.dylib` and `/usr/lib/libSystem.B.dylib`
+are loaded in every process, with real load addresses in dyld's image array, and neither exists
+as a file -- they live in the shared cache. This section has always said the parser must read
+through a byte-reader; that is now measured rather than argued, and the parser's test suite parses
+one of them from memory *and* asserts that opening its path fails, so the reason stays under test.
+
+**`dyld_all_image_infos` is read by offset, never as a struct.** `version` at 0, `infoArrayCount`
+at 4, `infoArray` at 8, `notification` at 16; 368 bytes at version 17, and the size grows with the
+version. `dyld_image_info` is 24 bytes, load address at 0 and a path *pointer* at 8. The address
+`task_info(TASK_DYLD_INFO)` returns belongs to the **target's** address space, so everything after
+it is a cross-process read and nothing is dereferenced.
+
+**At a target's first stop nothing is published yet.** That stop is dyld's own notification trap,
+and the image array is empty there. Everything downstream inherits it: no modules, and no module
+for any memory region, until the target has run. An empty read is therefore not a baseline for
+change tracking -- treating it as one reports all forty-five of a process's launch-time libraries
+as loads before its own code runs.
+
+**One `dlopen` is not one load event.** Asking for `libcurl` produced **302**, the whole
+dependency chain.
+
+**An executable's own `__TEXT` carries user tag 0.** The tag cannot say which module a region
+belongs to; that correlation comes from the image list. Tag 0 is named "untagged" rather than
+"unknown" -- it is what ordinary mapped file content carries, including the binary under the
+cursor.
+
+**`mach_vm_region_recurse` has two traps, both measured the hard way.** Its depth must not be
+reset between regions during a walk: resetting it re-enters the shared cache submap at every
+address and the walk never finishes -- 99,991 submaps against 8 for the same process. And it
+**overwrites the address it is given** with the start of whatever it found, so descending into a
+submap with that value asks about the submap's first byte rather than the caller's address. For
+any address in the shared cache -- every system library, in every process -- that answered with a
+reservation at `0x180000000` whose protection was 0 and whose base could not be read, while the
+address asked about was perfectly readable.
+
+**The kernel does not say that a target is stopped.** A thread parked in an unanswered exception
+reply reads as `TH_STATE_WAITING` with a suspend count of 0, and so does every thread of a task
+that `task_suspend` has suspended: the state describes what each thread was doing when it was
+frozen, not that it is frozen. The C API reports "is this the stopped thread" as its own field
+for that reason. `pth_name` is empty unless a thread named itself, and is a fixed buffer that
+need not be terminated when full.
 
 ### Fixup inspector
 
@@ -613,7 +669,7 @@ out of scope. The image's continued availability still needs a fresh check befor
 | 2 | MachBug skeleton: launch, attach, exception loop, stop/resume, signing working | Engine test harness |
 | 3 | Registers and memory read/write, both architectures | Register view populated on a real process — `regview.app`, checked by `regview --selftest` offscreen and by the engine suite on both architectures |
 | 4 | Software and hardware breakpoints, watchpoints, single-step, both architectures | Engine suite on both architectures, plus `regview --selftest-breakpoint` offscreen in CI: a breakpoint set from the bench stops the target at its address |
-| 5 | Mach-O module enumeration via dyld, memory map, thread list | Views populated |
+| 5 | Mach-O module enumeration via dyld, memory map, thread list | Engine suite on both architectures, plus `regview --selftest` offscreen in CI: the module list, the memory map and the thread list must be populated with values, not merely present |
 | 6 | Capstone behind the disassembly interface, both architectures | Disassembly view on native code |
 | 7 | Symbols: nlist plus DWARF/dSYM | Symbol view, source view |
 | 8 | Plugin loader and macOS SDK | StackContains evaluates `stack.contains` |
@@ -630,7 +686,7 @@ out of scope. The image's continued availability still needs a fresh check befor
 - The debuggability report answers correctly in all four cases of §9.
 - The read-only fixup inspector displays stub resolution for a loaded module.
 - A Tier 1 plugin compiled from unmodified source loads and runs.
-- x86-64 behaviour is either proven on an Intel CI runner or labelled `unverified`. **Proven for the engine as of milestone 3, and again for milestone 4**: the `macos-15-intel` job builds and runs the whole engine suite as the ordinary user. It reported `All tests passed (468 assertions in 48 test cases)` on x86_64, macOS 15.7.9 (2026-09-09), and `All tests passed (674 assertions in 74 test cases)` after milestone 4 (2026-09-10). That covers registers, memory, the exception loop, the attach path, and now software breakpoints, hardware breakpoints, watchpoints and stepping; the Qt front end is still built, smoke-launched and self-tested only on Apple Silicon.
+- x86-64 behaviour is either proven on an Intel CI runner or labelled `unverified`. **Proven for the engine as of milestone 3, and again for milestone 4**: the `macos-15-intel` job builds and runs the whole engine suite as the ordinary user. It reported `All tests passed (468 assertions in 48 test cases)` on x86_64, macOS 15.7.9 (2026-09-09), `All tests passed (674 assertions in 74 test cases)` after milestone 4 (2026-09-10), and `All tests passed (893 assertions in 92 test cases)` after milestone 5 (2026-09-11). That covers registers, memory, the exception loop, the attach path, software breakpoints, hardware breakpoints, watchpoints, stepping, and now the Mach-O parser, dyld enumeration, the memory map and thread detail; the Qt front end is still built, smoke-launched and self-tested only on Apple Silicon.
 - Credits and licences complete.
 
 ## 13. Open research questions
