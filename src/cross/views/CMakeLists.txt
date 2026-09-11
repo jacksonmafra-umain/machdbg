@@ -50,6 +50,8 @@ set(machdbg_views_SOURCES
 	BreakpointTable.h
 	EngineMemoryPage.cpp
 	EngineMemoryPage.h
+	EngineMemoryProvider.cpp
+	EngineMemoryProvider.h
 	MemoryMapTable.cpp
 	MemoryMapTable.h
 	ModuleTable.cpp

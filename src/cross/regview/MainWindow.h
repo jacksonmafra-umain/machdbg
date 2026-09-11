@@ -11,11 +11,13 @@
 #include <vector>
 
 #include "BreakpointTable.h"
+#include "EngineMemoryProvider.h"
 #include "MemoryMapTable.h"
 #include "ModuleTable.h"
 #include "ThreadTable.h"
 
 class Architecture;
+class Disassembly;
 class EngineMemoryPage;
 class HexDump;
 class QComboBox;
@@ -106,6 +108,11 @@ private:
     // there and fill in at the next one.
     void refreshInventory();
 
+    // Points the disassembly pane at the region holding the program counter. Separate from
+    // refreshMemory() because the hex dump and the disassembler follow the same address through
+    // two different pages, and a single function doing both hid which one had failed.
+    void refreshDisassembly();
+
     // The program counter to point the memory panel at: the stopped thread's when there is
     // one, and otherwise the first thread's. A Pause has no stopped thread -- it is a
     // task_suspend with no exception behind it -- so GetRegisters(threadId 0) fails there, and
@@ -126,6 +133,13 @@ private:
     ModuleTable* mModules = nullptr;
     MemoryMapTable* mMemoryMap = nullptr;
     ThreadTable* mThreads = nullptr;
+
+    Disassembly* mDisassembly = nullptr;
+    EngineMemoryPage* mDisassemblyPage = nullptr;
+
+    // Installed on the bridge while a target is live. Without it DbgIsDebugging() is false and
+    // the disassembly view -- which calls setDrawDebugOnly(true) -- paints nothing at all.
+    EngineMemoryProvider mMemoryProvider;
     QLineEdit* mBreakpointAddress = nullptr;
     QComboBox* mBreakpointKind = nullptr;
     QSpinBox* mBreakpointSize = nullptr;

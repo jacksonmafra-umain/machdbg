@@ -392,7 +392,15 @@ void QCapstone::UpdateArchitecture()
 void QCapstone::UpdateConfig()
 {
     mLongDataInst = ConfigBool("Disassembler", "LongDataInstruction");
-    mUseRunTrace = ConfigBool("Engine", "TraceRecordEnabledDuringTrace");
+
+    // Engine/TraceRecordEnabledDuringTrace is deliberately NOT read. The Zydis implementation
+    // read it into a member this one never uses -- the run-trace path was not ported -- and the
+    // key does not exist in this port's configuration, so asking for it opened a modal
+    // "NOT FOUND IN CONFIG!" dialog (Configuration::getBool). In an offscreen run with nobody to
+    // click it, that is a hang: the view self-test sat in QDialog::exec() forever, inside the
+    // Disassembly constructor, before a single instruction was decoded.
+    //
+    // Reading a setting nothing uses is the bug; adding the key would have hidden it.
 }
 
 void QCapstone::UpdateDataInstructionMap()

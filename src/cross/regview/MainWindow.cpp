@@ -31,6 +31,8 @@
 #include <cstdio>
 #include <unistd.h>
 
+#include <BasicView/Disassembly.h>
+
 #include "BreakpointTable.h"
 #include "MemoryMapTable.h"
 #include "ModuleTable.h"
@@ -42,10 +44,22 @@ namespace
 {
     // The same shape hex_viewer uses: this app shows 64-bit targets only, which is every target
     // milestone 3 supports (i386 has no register file in the engine).
+    // The target's architecture, not this machine's. Milestone 6 gave Architecture a cpu()
+    // question because a disassembler serving both instruction sets has to know which one it is
+    // reading; this is where the answer comes from, and it is set from the engine's GetArch once
+    // a target exists.
+    //
+    // Getting it wrong is not a crash, which is what makes it dangerous: x86-64 decoding of
+    // arm64 bytes produces plausible-looking instructions. The first run of this view reported
+    // `add eax, dword ptr [rcx]` at an arm64 program counter, and the self-test accepted it
+    // because the text was not empty.
     struct DefaultArchitecture : Architecture
     {
         bool disasm64() const override { return true; }
         bool addr64() const override { return true; }
+        Cpu cpu() const override { return mCpu; }
+
+        Cpu mCpu = Cpu::X86;
     } gArchitecture;
 
     // The callbacks arrive on the engine's loop thread. They do nothing but emit, because
@@ -107,6 +121,37 @@ MainWindow::MainWindow(QWidget* parent)
     mMemory = new HexDump(mArchitecture, this, mMemoryPage);
     mMemory->setAccessibleName(tr("Memory"));
 
+    // The dump's columns. Never configured before milestone 6, and it did not show: HexDump
+    // draws only when DbgIsDebugging() is true, which in this port means "a memory provider is
+    // installed" -- and nothing installed one until the disassembly view needed it. The first
+    // paint with no column descriptors indexes an empty list and Qt aborts the process, so the
+    // panel that had looked fine for three milestones was one provider away from crashing.
+    //
+    // Sixteen bytes a row, hex then ASCII, the same shape the Linux debugger's dump uses.
+    {
+        const int charwidth = mMemory->getCharWidth();
+        HexDump::ColumnDescriptor column;
+        HexDump::DataDescriptor data{};
+
+        column.isData = true;
+        column.itemCount = 16;
+        column.separator = 4;
+        data.itemSize = HexDump::Byte;
+        data.byteMode = HexDump::HexByte;
+        column.data = data;
+        mMemory->appendResetDescriptor(8 + charwidth * 47, tr("Hex"), false, column);
+
+        column.separator = 0;
+        data.byteMode = HexDump::AsciiByte;
+        column.data = data;
+        mMemory->appendDescriptor(8 + charwidth * 16, tr("ASCII"), false, column);
+
+        column.isData = false;
+        column.itemCount = 0;
+        column.data = data;
+        mMemory->appendDescriptor(0, "", false, column);
+    }
+
     mBreakpointList = new BreakpointTable(this);
 
     auto* splitter = new QSplitter(Qt::Horizontal, this);
@@ -164,6 +209,12 @@ MainWindow::MainWindow(QWidget* parent)
     benchLayout->addLayout(controls);
     benchLayout->addWidget(mBreakpointList, 1);
 
+    // Parentless, like the hex dump's page: Disassembly's destructor deletes the page it was
+    // given, and a QObject parent would delete it a second time.
+    mDisassemblyPage = new EngineMemoryPage();
+    mDisassembly = new Disassembly(mArchitecture, false, this, mDisassemblyPage);
+    mDisassembly->setAccessibleName(tr("Disassembly"));
+
     mModules = new ModuleTable(this);
     mMemoryMap = new MemoryMapTable(this);
     mThreads = new ThreadTable(this);
@@ -172,6 +223,7 @@ MainWindow::MainWindow(QWidget* parent)
     // registers and memory keep the room they were given.
     auto* inventory = new QTabWidget(this);
     inventory->setAccessibleName(tr("Inventory"));
+    inventory->addTab(mDisassembly, tr("Disassembly"));
     inventory->addTab(bench, tr("Breakpoints"));
     inventory->addTab(mModules, tr("Modules"));
     inventory->addTab(mMemoryMap, tr("Memory map"));
@@ -279,6 +331,19 @@ void MainWindow::startEngine(const QString& path, const int attachPid, const QSt
         return;
     }
     mMemoryPage->setEngine(mEngine);
+    mDisassemblyPage->setEngine(mEngine);
+
+    // The bridge learns about the target here. DbgIsDebugging() answers from this, and the
+    // disassembly view will not paint a cell until it is true.
+    mMemoryProvider.setEngine(mEngine);
+    DbgSetMemoryProvider(&mMemoryProvider);
+
+    // Before anything decodes a byte: the disassembler asks the Architecture, and the
+    // Architecture has no way of knowing on its own.
+    gArchitecture.mCpu = mEngine->GetArch(mEngine->impl) == DbgArch_Arm64
+                         ? Architecture::Cpu::Arm64
+                         : Architecture::Cpu::X86;
+
     mDescriptorsSet = false;
     mStartReturned.store(false);
 
@@ -410,6 +475,40 @@ bool MainWindow::selfTest(QStringList* report) const
         }
     }
 
+    // The disassembly pane, checked the way every other view here is: by content. A pane of
+    // blank rows renders exactly like a populated one, and the instruction at the program
+    // counter is the row a user looks at first.
+    QString instructionAtPc;
+    QByteArray bytesAtPc;
+    if(mDisassemblyPage->getSize() > 0 && mProgramCounter >= mDisassemblyPage->getBase())
+    {
+        const Instruction_t inst =
+            mDisassembly->DisassembleAt(mProgramCounter - mDisassemblyPage->getBase());
+        instructionAtPc = inst.instStr;
+        bytesAtPc = inst.dump;
+    }
+
+    bool bytesAreReal = false;
+    for(const char byte : bytesAtPc)
+    {
+        if(byte != 0)
+            bytesAreReal = true;
+    }
+    // "???" is what QCapstone reports for bytes it will not vouch for, so a pane showing it at
+    // the program counter is a pane that decoded nothing -- which reads identically to a
+    // working one unless this check says otherwise.
+    //
+    // And the length has to match the architecture, which is the check this test did NOT have
+    // the first time it ran: it accepted `add eax, dword ptr [rcx]` at an arm64 program counter
+    // because the text was not empty. Decoding arm64 bytes as x86-64 does not fail, it invents
+    // -- so on arm64 every instruction is exactly four bytes, and anything else means the view
+    // is reading the right memory with the wrong architecture.
+    const bool lengthMatchesArchitecture =
+        mEngine->GetArch(mEngine->impl) != DbgArch_Arm64 || bytesAtPc.size() == 4;
+    const bool disassemblyPopulated = !instructionAtPc.isEmpty() &&
+                                      instructionAtPc != QStringLiteral("???") && bytesAreReal &&
+                                      lengthMatchesArchitecture;
+
     if(report)
     {
         report->append(QStringLiteral("modules %1 row(s), a slide that is not zero: %2")
@@ -418,6 +517,10 @@ bool MainWindow::selfTest(QStringList* report) const
         report->append(QStringLiteral("memory map %1 row(s), a region naming a module: %2")
             .arg(mapRows.size())
             .arg(aRegionNamesAModule ? QStringLiteral("yes") : QStringLiteral("no")));
+        report->append(QStringLiteral("disassembly at pc 0x%1: '%2' (%3 byte(s), length matches "
+                                      "the architecture: %4)")
+            .arg(mProgramCounter, 0, 16).arg(instructionAtPc).arg(bytesAtPc.size())
+            .arg(lengthMatchesArchitecture ? QStringLiteral("yes") : QStringLiteral("no")));
         // Where the panel was pointed and what the map says about that base: a read that fails
         // at a region's own base is either the wrong region or an unbacked one, and those two
         // look identical without this line.
@@ -443,7 +546,8 @@ bool MainWindow::selfTest(QStringList* report) const
     }
 
     return pcPopulated && spPopulated && memoryReadable &&
-           aModuleHasASlide && aRegionNamesAModule && aThreadHasAProgramCounter;
+           aModuleHasASlide && aRegionNamesAModule && aThreadHasAProgramCounter &&
+           disassemblyPopulated;
 }
 
 bool MainWindow::letTheTargetRun()
@@ -620,6 +724,7 @@ void MainWindow::onStopped()
     refreshInventory();
     refreshRegisters();
     refreshMemory();
+    refreshDisassembly();
     refreshBreakpoints();
     // Not overwritten when a breakpoint stop has already said something more specific: "Stopped"
     // on top of "Stopped on a hardware write watchpoint" would throw away the only part of the
@@ -818,6 +923,22 @@ void MainWindow::refreshInventory()
     }
 }
 
+void MainWindow::refreshDisassembly()
+{
+    if(!mEngine || mProgramCounter == 0)
+        return;
+
+    uint64_t base = 0;
+    uint64_t size = 0;
+    if(mEngine->MemFindBaseAddr(mEngine->impl, mProgramCounter, &base, &size) != DbgStatus_Ok)
+        return;
+
+    mDisassemblyPage->setAttributes(base, size);
+    mDisassembly->setRowCount(size);
+    mDisassembly->setTableOffset(mProgramCounter - base);
+    mDisassembly->reloadData();
+}
+
 void MainWindow::refreshBreakpoints()
 {
     for(BreakpointTable::Row& row : mBreakpointRows)
@@ -945,6 +1066,11 @@ void MainWindow::stopEngine()
     }
 
     mMemoryPage->setEngine(nullptr);
+    mDisassemblyPage->setEngine(nullptr);
+    // Uninstalled before the engine is destroyed, and in this order: a provider left pointing
+    // at a freed engine is a crash the moment anything repaints.
+    DbgSetMemoryProvider(nullptr);
+    mMemoryProvider.setEngine(nullptr);
     // Destroyed only if the loop actually returned: MachBugDestroy() tears down the Debugger the
     // detached thread would still be reading from.
     if(mStartReturned.load())

@@ -140,6 +140,22 @@ A passing run prints every register row, the memory panel's base and size, and
 the *values*: a table of 34 rows of zeroes is what a view that renders but is never fed looks
 like, and a row count alone would accept it.
 
+### Disassembly
+
+Milestone 6 adds a disassembly tab, decoded by Capstone and fed from the target's own memory at
+the stopped thread's program counter.
+
+Two things about it are worth knowing, because both were found the hard way:
+
+- **The view paints nothing unless a memory provider is installed.** `Disassembly` calls
+  `setDrawDebugOnly(true)`, and this port's `DbgIsDebugging()` answers "is a provider
+  installed". `regview` installs one when it launches a target and removes it when the target
+  goes away.
+- **The architecture comes from the engine, not from the machine.** Decoding arm64 bytes as
+  x86-64 does not fail -- it invents plausible instructions -- so `--selftest` checks that the
+  instruction at the program counter is four bytes long on arm64, not merely that it is not
+  empty.
+
 ### Modules, the memory map and threads
 
 Milestone 5 adds three more tables, in a tabbed panel beside the breakpoint bench: the modules

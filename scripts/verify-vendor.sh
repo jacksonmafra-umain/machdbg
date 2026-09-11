@@ -105,6 +105,8 @@ required=(
     src/cross/views/MemoryMapTable.cpp
     src/cross/views/ThreadTable.h
     src/cross/views/ThreadTable.cpp
+    src/cross/views/EngineMemoryProvider.h
+    src/cross/views/EngineMemoryProvider.cpp
     src/cross/widgets/CapstoneVersion.h
     src/cross/tests/disasm/cmake.toml
     src/cross/tests/disasm/CMakeLists.txt

@@ -89,8 +89,8 @@ int main(int argc, char* argv[])
 
     for(const QString& line : report)
         std::fputs(qPrintable(line + QLatin1Char('\n')), stdout);
-    std::fputs(passed ? "RESULT: registers, memory, modules, the memory map and threads are "
-                        "all populated\n"
+    std::fputs(passed ? "RESULT: registers, memory, disassembly, modules, the memory map and "
+                        "threads are all populated\n"
                       : "RESULT: FAILED -- see the rows above\n", stdout);
     return passed ? 0 : 1;
 }
