@@ -15,7 +15,23 @@ namespace MachBug::memory
         uint32_t protection = 0;      // current, VM_PROT_* bits
         uint32_t maxProtection = 0;
         uint32_t userTag = 0;         // VM_MEMORY_*, filled by EnumRegions only
+        uint32_t depth = 0;           // 0 for the task's own map, deeper inside a submap
+        bool isSubmap = false;
+
+        // A readable name for userTag, from static storage -- never null, and never "unknown"
+        // for tag 0, which means untagged rather than unrecognised. See TagName().
+        const char* tagName = "";
     };
+
+    // What a user tag means, as words. MEASURED before this table was written, because the
+    // taxonomy is not Windows's and guessing at it produces a map that reads plausibly and says
+    // the wrong thing: a process's own __TEXT comes back with tag 0, its stack with 30
+    // (VM_MEMORY_STACK) and a small malloc with 7 (VM_MEMORY_MALLOC_TINY).
+    //
+    // Tag 0 is therefore NOT "unknown". It is what ordinary mapped file content carries,
+    // including the executable a user is looking at, and labelling it unknown would put the
+    // most important row in the map under the least informative name.
+    const char* TagName(uint32_t tag);
 
     bool Read(mach_port_t task, uint64_t address, void* dest, uint64_t size, std::string* error);
 
@@ -29,9 +45,12 @@ namespace MachBug::memory
 
     bool RegionOf(mach_port_t task, uint64_t address, Region* out, std::string* error);
 
-    // Fills up to `capacity` regions, walking the address space from 0, and returns how many were
-    // written. A caller that gets `capacity` back should ask again with more room. This is the
-    // only entry point that fills Region::userTag -- see the implementation for why the tag costs
-    // a second query nobody else needs.
+    // Fills up to `capacity` regions, walking the address space from 0, and returns how many
+    // were written. A caller that gets `capacity` back should ask again with more room.
+    //
+    // Walks with mach_vm_region_recurse rather than mach_vm_region, which is what reports
+    // submaps at all -- and the shared cache, which is most of what any process maps, is behind
+    // one. The recursive call also returns the user tag in the same reply, so the tag no longer
+    // costs the second query the old walk needed.
     uint32_t EnumRegions(mach_port_t task, Region* out, uint32_t capacity);
 }

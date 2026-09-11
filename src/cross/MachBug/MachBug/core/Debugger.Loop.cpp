@@ -1003,6 +1003,11 @@ namespace MachBug
             cbUnloadModule(image.loadAddress);
     }
 
+    std::vector<Modules::Image> Debugger::LoadedModules() const
+    {
+        return mModules.Known();
+    }
+
     std::size_t Debugger::ModuleCount() const
     {
         return mModules.Known().size();
