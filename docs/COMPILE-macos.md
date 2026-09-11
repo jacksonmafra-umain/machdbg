@@ -125,6 +125,23 @@ architecture, so the x86-64 cases run on Apple Silicon too. That is the only pla
 decoding is checked -- the Intel CI job builds and runs `MachBug_tests` alone and never builds a
 Qt target.
 
+### Why the test fixtures are signed, and why the tests need no root
+
+The engine tests are a different case from the distribution signing described under "Signing"
+below: they debug small programs `MachBug_tests` builds and launches itself
+(`src/cross/MachBug/tests/targets/`), not an installed copy of machdbg. Each of those fixtures is ad-hoc signed with the
+`com.apple.security.get-task-allow` entitlement as a build step (see the `codesign` custom
+command in `MachBug/tests/cmake.toml`) -- that is the entitlement `task_for_pid` actually checks
+for a target that opted in, and it is unrelated to `com.apple.security.cs.debugger`, which only
+matters for reaching a target that did *not* opt in.
+
+Milestone 0's plan assumed this would need root, on the premise that only an Apple-issued
+identity with the debugger entitlement could call `task_for_pid` at all. That was measured and
+found false: a same-user caller with no debugger entitlement of its own reaches a target signed
+with `get-task-allow` and is denied (`KERN_FAILURE`) against one that lacks it -- root changes
+neither outcome. Run the tests as your ordinary user; no `sudo`, and CI does not use it either
+(see the comment next to the test step in `.github/workflows/macos.yml`).
+
 ## Seeing a target's registers and memory
 
 `regview` is milestone 3's proof, extended by milestone 4: it launches or attaches to a target,
