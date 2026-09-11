@@ -194,6 +194,13 @@ namespace MachBug
         // when it stops the target, because that is the only moment it can act on what it sees.
         std::size_t ThreadCount() const;
 
+        // The ids the engine knew about at the last stop, and what it can say about one of
+        // them. Both answer from what was seen at that stop rather than re-enumerating: a
+        // caller drawing a thread list wants it to belong to the same moment as the registers
+        // beside it, and a fresh task_threads would mint ports nothing releases.
+        std::vector<uint64_t> KnownThreads() const;
+        bool DescribeThread(uint64_t threadId, Threads::Detail* out) const;
+
         // Where the exception loop is in its shutdown, as words. Exists for one purpose: when a
         // caller's bounded wait for Start() to return runs out, the interesting question is
         // which stage it is stuck in, and a bound that fires without saying that only reports

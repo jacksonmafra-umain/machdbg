@@ -1008,3 +1008,80 @@ TEST_CASE("the memory map names the module a region belongs to")
 
     MachBugDestroy(engine);
 }
+
+TEST_CASE("the vtable enumerates threads with names, states and program counters")
+{
+    BreakpointHarness harness;
+    DbgEngineCallbacks callbacks{};
+    callbacks.onSystemBreakpoint = onBreakpointHarnessSystemBreakpoint;
+    callbacks.userdata = &harness;
+
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+
+    const std::string path = FIXTURE("multi_threaded");
+    DbgLaunchSpec spec{};
+    spec.path = path.c_str();
+
+    std::thread startThread([&] {
+        engine->Start(engine->impl, &spec);
+        harness.startReturned.store(true, std::memory_order_release);
+    });
+
+    for(int i = 0; i < 500 && !harness.stopped.load(std::memory_order_acquire) &&
+                   !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool stopped = harness.stopped.load(std::memory_order_acquire);
+
+    // At the first stop the fixture has not spawned anything yet, so this is the one thread it
+    // was born with -- and the one the stop is on, which is the flag under test.
+    DbgThread atFirstStop[8]{};
+    uint32_t firstCount = 0;
+    const DbgStatus firstResult = engine->ThreadEnum(engine->impl, atFirstStop, 8, &firstCount);
+    const bool firstIsStopped = firstCount == 1 && atFirstStop[0].isStoppedThread;
+    const uint64_t firstPc = firstCount == 1 ? atFirstStop[0].pc : 0;
+
+    engine->Continue(engine->impl);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    engine->Pause(engine->impl);
+
+    DbgThread threads[16]{};
+    uint32_t count = 0;
+    const DbgStatus result = engine->ThreadEnum(engine->impl, threads, 16, &count);
+
+    std::vector<std::string> names;
+    bool everyStateNamed = true;
+    bool everyPcReadable = true;
+    for(uint32_t i = 0; i < count; ++i)
+    {
+        if(threads[i].runStateName == nullptr || threads[i].runStateName[0] == '\0')
+            everyStateNamed = false;
+        if(threads[i].pc <= 0x1000)
+            everyPcReadable = false;
+        if(threads[i].name[0] != '\0')
+            names.emplace_back(threads[i].name);
+    }
+
+    engine->Stop(engine->impl);
+    for(int i = 0; i < 500 && !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if(harness.startReturned.load(std::memory_order_acquire))
+        startThread.join();
+    else
+        startThread.detach();
+
+    INFO("last engine diagnostic: " << DbgLastErrorString());
+    REQUIRE(stopped);
+    REQUIRE(firstResult == DbgStatus_Ok);
+    REQUIRE(firstIsStopped);
+    REQUIRE(firstPc > 0x1000);
+
+    REQUIRE(result == DbgStatus_Ok);
+    INFO(count << " threads, " << names.size() << " named");
+    REQUIRE(count >= 3);
+    REQUIRE(everyStateNamed);
+    REQUIRE(everyPcReadable);
+    REQUIRE(names.size() == 2);
+
+    MachBugDestroy(engine);
+}

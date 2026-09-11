@@ -37,6 +37,7 @@
 #include <MachBug/arch/Arch.h>
 #include <MachBug/core/Debugger.h>
 #include <MachBug/core/Modules.h>
+#include <MachBug/core/Threads.h>
 #include <MachBug/memory/Memory.h>
 
 #include <mach/vm_prot.h>
@@ -541,6 +542,64 @@ namespace
         return DbgStatus_Ok;
     }
 
+    DbgStatus vtThreadEnum(void* impl, DbgThread* out, const uint32_t capacity, uint32_t* count)
+    {
+        if(count)
+            *count = 0;
+
+        auto* engine = toEngine(impl);
+        if(!engine || engine->GetTaskPort() == MACH_PORT_NULL)
+        {
+            tlsLastError = "no target: launch or attach before enumerating threads";
+            return DbgStatus_NotAttached;
+        }
+        if(out == nullptr || capacity == 0)
+        {
+            tlsLastError = "no room to write threads into";
+            return DbgStatus_InvalidArgument;
+        }
+
+        // What the engine saw at the last stop, not a fresh task_threads: the thread list a
+        // caller is drawing belongs to the same moment as the registers and the memory beside
+        // it, and re-enumerating here would mint ports nothing releases.
+        const std::vector<uint64_t> known = engine->KnownThreads();
+        const mach_port_t stopped = engine->StoppedThread();
+
+        uint32_t written = 0;
+        for(const uint64_t id : known)
+        {
+            if(written == capacity)
+                break;
+
+            MachBug::Threads::Detail detail;
+            if(!engine->DescribeThread(id, &detail))
+                continue;
+
+            DbgThread entry{};
+            entry.id = detail.id;
+            entry.runState = static_cast<uint32_t>(detail.runState);
+            entry.runStateName = detail.runStateName;
+            entry.isStoppedThread = detail.port == stopped && stopped != MACH_PORT_NULL;
+            std::snprintf(entry.name, sizeof(entry.name), "%s", detail.name.c_str());
+
+            // Through arch::Read rather than thread_get_state here: that is where pointer
+            // authentication is stripped on arm64 (spec section 6), and a second place that
+            // read a program counter would be a second place to forget it.
+            DbgRegisters regs{};
+            std::string readError;
+            if(MachBug::arch::Read(vtGetArch(impl), detail.port, &regs, &readError))
+            {
+                entry.pc = vtGetArch(impl) == DbgArch_Arm64 ? regs.arm64.pc : regs.x86_64.rip;
+            }
+
+            out[written++] = entry;
+        }
+
+        if(count)
+            *count = written;
+        return DbgStatus_Ok;
+    }
+
     DbgStatus vtModBaseFromAddr(void* /*impl*/, uint64_t /*addr*/, uint64_t* /*base*/)
     {
         return DbgStatus_NotSupported;
@@ -674,6 +733,7 @@ extern "C" {
         vtable->MemIsValidPtr = vtMemIsValidPtr;
         vtable->MemEnumRegions = vtMemEnumRegions;
 
+        vtable->ThreadEnum = vtThreadEnum;
         vtable->ModBaseFromAddr = vtModBaseFromAddr;
         vtable->ModNameFromAddr = vtModNameFromAddr;
 

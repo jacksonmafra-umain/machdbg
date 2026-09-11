@@ -1,6 +1,7 @@
 #include <MachBug/core/Threads.h>
 
 #include <algorithm>
+#include <cstring>
 
 namespace MachBug
 {
@@ -117,5 +118,64 @@ namespace MachBug
         for(const Entry& entry : mKnown)
             ports.push_back(entry.port);
         return ports;
+    }
+
+    const char* Threads::RunStateName(const int32_t runState)
+    {
+        switch(runState)
+        {
+        case TH_STATE_RUNNING:         return "running";
+        case TH_STATE_STOPPED:         return "stopped";
+        case TH_STATE_WAITING:         return "waiting";
+        case TH_STATE_UNINTERRUPTIBLE: return "uninterruptible";
+        case TH_STATE_HALTED:          return "halted";
+        default:                       return "unknown";
+        }
+    }
+
+    bool Threads::Describe(const uint64_t id, Detail* const out) const
+    {
+        if(out == nullptr)
+            return false;
+
+        const mach_port_t port = PortFor(id);
+        if(port == MACH_PORT_NULL)
+            return false;
+
+        *out = Detail{};
+        out->id = id;
+        out->port = port;
+
+        // THREAD_EXTENDED_INFO (flavor 5) is the only way to read another process's thread
+        // names: pthread_getname_np reads the caller's own threads and has no cross-process
+        // form. A thread that never named itself comes back with an empty pth_name, which is
+        // most of them.
+        thread_extended_info_data_t extended{};
+        mach_msg_type_number_t count = THREAD_EXTENDED_INFO_COUNT;
+        if(thread_info(port, THREAD_EXTENDED_INFO, reinterpret_cast<thread_info_t>(&extended),
+                       &count) == KERN_SUCCESS)
+        {
+            // pth_name is a fixed buffer that need not be terminated when full.
+            const char* const name = extended.pth_name;
+            const std::size_t length = ::strnlen(name, sizeof(extended.pth_name));
+            out->name.assign(name, length);
+            out->runState = extended.pth_run_state;
+        }
+        else
+        {
+            // Fall back to the basic info, which every thread has: a list that loses a row
+            // because one flavor was unavailable is worse than one with less detail in it.
+            thread_basic_info_data_t basic{};
+            mach_msg_type_number_t basicCount = THREAD_BASIC_INFO_COUNT;
+            if(thread_info(port, THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&basic),
+                           &basicCount) != KERN_SUCCESS)
+            {
+                return false;
+            }
+            out->runState = basic.run_state;
+        }
+
+        out->runStateName = RunStateName(out->runState);
+        return true;
     }
 }
