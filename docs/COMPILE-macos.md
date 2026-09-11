@@ -11,6 +11,12 @@
 | Capstone | 5 | `brew install capstone` — linked by the build as of milestone 6, not merely checked for |
 | Qt | 6 | Official Qt online installer |
 
+Capstone is found through `pkg-config`. If configuring fails with
+`capstone/capstone.h: No such file or directory`, the cause is Capstone's own `.pc` file, which
+reports its include directory as `<prefix>/include/capstone` -- one level below where
+`#include <capstone/capstone.h>` resolves. The build corrects that itself; a hand-written
+`CAPSTONE_CFLAGS` override has to do the same.
+
 Qt does not come from Homebrew. Homebrew builds Qt for one architecture, and machdbg ships a
 universal binary for arm64 and x86-64, which needs the universal Qt from the official
 installer.
@@ -104,6 +110,20 @@ cmake --preset macos-arm64 -DMACHBUG_BUILD_TESTS=ON
 cmake --build build/macos-arm64 --target MachBug_tests
 ./build/macos-arm64/tests/MachBug_tests
 ```
+
+Milestone 6 adds a second suite, `machdbg_disasm_tests`, for the disassembler and the tokenizer.
+It is separate because it links Qt and the widgets library, while `MachBug_tests` deliberately
+links neither -- the engine is testable without a GUI toolkit and is kept that way:
+
+```bash
+cmake --build build/macos-arm64 --target machdbg_disasm_tests
+./build/macos-arm64/tests/disasm/machdbg_disasm_tests
+```
+
+Both architectures are decoded here whatever the host is: Capstone opens a handle per
+architecture, so the x86-64 cases run on Apple Silicon too. That is the only place x86-64
+decoding is checked -- the Intel CI job builds and runs `MachBug_tests` alone and never builds a
+Qt target.
 
 ## Seeing a target's registers and memory
 

@@ -113,10 +113,12 @@ The upstream extraction is at an earlier stage than the project brief implies. W
 files *outside* the curated list may be removed, but only once that list has been enumerated and
 the build proves what is actually referenced.
 
-**Zydis stays until milestone 6.** `x64dbg_widgets` links `zydis_wrapper` today. The coupling is
-narrow and already named — `Disassembler/QZydis.{cpp,h}` and
-`Disassembler/ZydisTokenizer.{cpp,h}`, with `BasicView/Disassembly.{cpp,h}` as the consumer — so
-it is retired when the Capstone tokenizer arrives to replace it (§7), not at vendor time.
+**Zydis stayed until milestone 6, and is now gone.** `x64dbg_widgets` linked `zydis_wrapper`
+through milestone 5. The coupling was narrow and already named — `Disassembler/QZydis.{cpp,h}`
+and `Disassembler/ZydisTokenizer.{cpp,h}`, with `BasicView/Disassembly.{cpp,h}` as the consumer
+— and it was retired when the Capstone tokenizer arrived to replace it (§7), not at vendor time.
+`QCapstone` and `CapstoneTokenizer` are what those files became; `zydis_wrapper` is off the link
+line and the vendored tree, 69,658 lines lighter.
 
 `ElfBug` is a deliberate exception of a different kind. It is vendored and never built, because
 the engine API is specified as a mirror of `elfbug_api.h` and a mirror needs its original.
@@ -339,15 +341,27 @@ entry point to the debuggability report in §9.
 ## 7. Disassembly, assembly and analysis
 
 Capstone serves both architectures, one handle each, created once, with `CS_OPT_DETAIL`
-enabled. The AArch64 architecture constant was renamed between Capstone 5 and 6
-(`CS_ARCH_ARM64` became `CS_ARCH_AARCH64`); confirm against the installed header rather than
-assuming.
+enabled. It comes from Homebrew, per D5, so the installed version is whatever the user's
+Homebrew carries rather than something this repository pins.
+
+**Corrected, milestone 6.** This section claimed the AArch64 architecture constant "was renamed
+between Capstone 5 and 6 (`CS_ARCH_ARM64` became `CS_ARCH_AARCH64`)". The rename has not
+happened at 5.0.9, which is the version measured here, so the advice to confirm against the
+installed header stands but the statement of fact did not. `widgets/CapstoneVersion.h` resolves
+whichever spelling the header defines, and it is the only file in the port that names either.
 
 ### Token model
 
 The highlighter consumes a classified token stream — mnemonic, register, immediate, memory
 bracket, prefix — not printed text. With Zydis gone, that stream is built from `cs_detail`:
-a shared token emitter plus a per-architecture operand walker behind `IArchOps`.
+a shared token emitter plus a per-architecture operand walker.
+
+**Corrected, milestone 6.** The walkers were to sit "behind `IArchOps`". No such interface was
+written, because there was nothing for it to abstract over: `CapstoneTokenizer` chooses between
+`tokenizeArm64Operands` and `tokenizeX86Operands` on `Architecture::cpu()`, and the two have
+nothing in common below that call — `cs_arm64_op` and `cs_x86_op` share neither field names nor
+operand kinds. An interface over two functions with one caller would have been indirection
+without abstraction.
 
 Re-lexing Capstone's printed string was considered and rejected. It is cheaper but discards
 classification: an immediate becomes an anonymous number, a register becomes a word. Building
@@ -358,15 +372,6 @@ The seam already exists upstream and is narrow: `Disassembler/QZydis.{cpp,h}` an
 `Disassembler/Architecture.{cpp,h}` alongside. The work is a `QCapstone` and
 `CapstoneTokenizer` pair honouring the same interface, after which `zydis_wrapper` leaves the
 link line. That retirement is milestone 6, per D5.
-
-### Assembler
-
-Open question, deliberately not answered here (§13). asmjit has an AArch64 backend and a clean
-zlib licence, but the *parser* is the problem: asmtk has historically assembled x86 only, and
-its AArch64 parsing support must be verified. Keystone is excluded on licence grounds — it is
-GPLv2-only, which is incompatible with a GPLv3 project. The remaining candidates are asmtk if
-it parses AArch64, LLVM MC used purely as an assembler, or invoking the Clang integrated
-assembler.
 
 #### What milestone 6 measured about branches
 
@@ -382,6 +387,58 @@ was found by printing what Capstone actually reports rather than by reading abou
   (1 for `b.eq`, `ARM64_CC_INVALID` for `b` and `br`) on arm64, and the instruction id
   (`X86_INS_JMP`) on x86-64.
 - `ret` carries `CS_GRP_RET` on both and no destination, which is what it should be.
+
+#### What milestone 6 measured
+
+The branch measurements are directly above. The rest:
+
+**Capstone comes from Homebrew, and its version is not this project's to pin.** 5.0.9 here, API
+5.0, both architectures supported. Two consequences, both measured:
+
+- `pkg-config --cflags capstone` answers `<prefix>/include/capstone`, under which the
+  `#include <capstone/capstone.h>` every example uses does not resolve. The build corrects the
+  path rather than passing the reported flags through.
+- **The rename this section warned about has not happened.** `CS_ARCH_ARM64` is still the name
+  at 5.0.9. `CapstoneVersion.h` defines the constant in terms of whichever exists and nothing
+  else in the port spells either one.
+
+**`cs_regs_access` answers on both architectures**, so `Instruction_t::regsReferenced` comes
+straight from it. Implicit and explicit access are *not* distinguished: Capstone's access list
+does not separate them, and inventing the distinction would be worse than omitting it.
+
+**Zydis is gone**, and the check is the link line rather than the file count: zero Zydis symbols
+in all five bundles and in the widgets library, `zydis_wrapper` off `target_link_libraries`,
+69,658 lines deleted. The tokenizer was derived from the Zydis one, because only eleven of its
+functions ever touched Zydis -- the colour table, the string pool and the rich-text rendering
+classify and render tokens regardless of who decoded the bytes.
+
+**Three defects the disassembly view surfaced, none of them in the disassembler.** Worth
+recording because each is a property of this port rather than a one-off:
+
+- `Disassembly` calls `setDrawDebugOnly(true)`, so `AbstractTableView` paints nothing unless
+  `DbgIsDebugging()` is true -- which here means "a memory provider is installed". A correct,
+  fed view draws nothing without one.
+- The hex dump had never had its column descriptors configured. It had never painted either,
+  for the same reason, so the panel had been one provider away from an out-of-range index since
+  milestone 3.
+- `Configuration::getBool` opens a **modal dialog** for a key that is not in this port's
+  defaults. Offscreen, that is a hang rather than a warning: the view self-test sat in
+  `QDialog::exec()` inside a constructor until it was killed.
+
+**Decoding the wrong architecture does not fail, it invents.** Pointed at arm64 memory with an
+x86-64 handle, the view reported `add eax, dword ptr [rcx]` at a program counter whose real
+instruction was `b.lo`. The self-test accepted it, because the text was not empty. It now
+requires four-byte instructions on arm64, which is the only check that separates a right answer
+from a plausible one.
+
+### Assembler
+
+Open question, deliberately not answered here (§13). asmjit has an AArch64 backend and a clean
+zlib licence, but the *parser* is the problem: asmtk has historically assembled x86 only, and
+its AArch64 parsing support must be verified. Keystone is excluded on licence grounds — it is
+GPLv2-only, which is incompatible with a GPLv3 project. The remaining candidates are asmtk if
+it parses AArch64, LLVM MC used purely as an assembler, or invoking the Clang integrated
+assembler.
 
 ### Analysis on arm64
 
@@ -648,6 +705,12 @@ Three layers, and only the middle one needs privilege.
 itself here — plus the token emitter, the fixup parser and the vendored expression parser tests.
 No process, no signing, runs on any runner.
 
+Milestone 6 split this layer in two, along the line Qt draws. `MachBug_tests` links no GUI
+toolkit and is what the Intel job runs; `machdbg_disasm_tests` links Qt and the widget library
+because the tokenizer is a widget-library class, and runs on Apple Silicon only — 67 assertions
+in 16 test cases, covering both architectures, since Capstone decodes x86-64 on an arm64 host
+perfectly well. Keeping the engine suite free of Qt is what makes the Intel job possible at all.
+
 **Engine integration.** Small C targets mirroring `ElfBug/tests/targets/*`, launched under
 MachBug. This section originally claimed CI would have to run engine tests as root, on the
 premise that `task_for_pid` needs an Apple-issued certificate that CI does not have. That premise
@@ -685,7 +748,7 @@ out of scope. The image's continued availability still needs a fresh check befor
 | 3 | Registers and memory read/write, both architectures | Register view populated on a real process — `regview.app`, checked by `regview --selftest` offscreen and by the engine suite on both architectures |
 | 4 | Software and hardware breakpoints, watchpoints, single-step, both architectures | Engine suite on both architectures, plus `regview --selftest-breakpoint` offscreen in CI: a breakpoint set from the bench stops the target at its address |
 | 5 | Mach-O module enumeration via dyld, memory map, thread list | Engine suite on both architectures, plus `regview --selftest` offscreen in CI: the module list, the memory map and the thread list must be populated with values, not merely present |
-| 6 | Capstone behind the disassembly interface, both architectures | Disassembly view on native code |
+| 6 | Capstone behind the disassembly interface, both architectures; Zydis retired | Decoder and tokenizer tests on both architectures, plus `regview --selftest` offscreen in CI: the instruction at the program counter must be real **and the right length for the architecture** |
 | 7 | Symbols: nlist plus DWARF/dSYM | Symbol view, source view |
 | 8 | Plugin loader and macOS SDK | StackContains evaluates `stack.contains` |
 | 9 | Database, analysis, graph, script engine | End-to-end session on a sample app |
@@ -701,7 +764,7 @@ out of scope. The image's continued availability still needs a fresh check befor
 - The debuggability report answers correctly in all four cases of §9.
 - The read-only fixup inspector displays stub resolution for a loaded module.
 - A Tier 1 plugin compiled from unmodified source loads and runs.
-- x86-64 behaviour is either proven on an Intel CI runner or labelled `unverified`. **Proven for the engine as of milestone 3, and again for milestone 4**: the `macos-15-intel` job builds and runs the whole engine suite as the ordinary user. It reported `All tests passed (468 assertions in 48 test cases)` on x86_64, macOS 15.7.9 (2026-09-09), `All tests passed (674 assertions in 74 test cases)` after milestone 4 (2026-09-10), and `All tests passed (893 assertions in 92 test cases)` after milestone 5 (2026-09-11). That covers registers, memory, the exception loop, the attach path, software breakpoints, hardware breakpoints, watchpoints, stepping, and now the Mach-O parser, dyld enumeration, the memory map and thread detail; the Qt front end is still built, smoke-launched and self-tested only on Apple Silicon.
+- x86-64 behaviour is either proven on an Intel CI runner or labelled `unverified`. **Proven for the engine at every milestone from 3 through 6**: the `macos-15-intel` job builds and runs the whole engine suite as the ordinary user. It reported `All tests passed (468 assertions in 48 test cases)` on x86_64, macOS 15.7.9 (2026-09-09), `All tests passed (674 assertions in 74 test cases)` after milestone 4 (2026-09-10), `All tests passed (893 assertions in 92 test cases)` after milestone 5, and `All tests passed (1140 assertions in 93 test cases)` after milestone 6 (2026-09-11). That covers registers, memory, the exception loop, the attach path, software breakpoints, hardware breakpoints, watchpoints, stepping, the Mach-O parser, dyld enumeration, the memory map and thread detail; the Qt front end is still built, smoke-launched and self-tested only on Apple Silicon. That includes milestone 6's decoder and tokenizer tests, which link Qt and therefore run in the Apple Silicon job only — x86-64 *decoding* is exercised there, on a handle opened for x86-64, rather than on an Intel machine.
 - Credits and licences complete.
 
 ## 13. Open research questions
@@ -768,8 +831,11 @@ Verified against the source:
 - `widgets/Qt.cmake` resolves Qt 6 ahead of Qt 5 and has no macOS bundling.
 
 Corrected as a result, with the original claims struck: `src/gui` is not deletable (§4), Zydis
-is not removable before milestone 6 (§4, D5), and the widget library does not yet contain the
-memory map, thread, symbol, graph or stack views (§3).
+is not removable before milestone 6 (§4, D5) — and as of milestone 6 it has been removed — and
+the widget library does not yet contain the memory map, thread, symbol, graph or stack views
+(§3). Milestone 5 did not change that: its module, memory map and thread tables live in
+`src/cross/views` and are built on `StdTable`, rather than being the upstream views the widget
+library is still missing.
 
 Still unverified, and to be checked before the milestone that depends on each: the 272
 `BRIDGE_IMPEXP` exports and 39 `PLUG_IMPEXP` functions quoted from the brief, the internals of
