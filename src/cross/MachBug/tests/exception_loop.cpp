@@ -346,3 +346,39 @@ TEST_CASE("Stop() kills a genuinely running target instead of hanging on its own
     REQUIRE(rc == -1);
     REQUIRE(errno == ESRCH);
 }
+
+TEST_CASE("the attach handshake produces exactly one first stop, whichever signal starts it")
+{
+    // MEASURED, and the reason this test exists at all (issue #64): about one launch in five
+    // begins with the SIGSTOP that ptrace(2) attributes to PT_ATTACHEXC rather than with the
+    // SIGCONT this engine sends to undo POSIX_SPAWN_START_SUSPENDED. Over sixty launches:
+    // forty-seven SIGCONT-first, thirteen SIGSTOP-first, and never two SIGCONTs.
+    //
+    // Both orders have to look the same from outside -- one first stop, nothing unexplained --
+    // and a single run has a four-in-five chance of only ever exercising the common one. Twenty
+    // rounds make the other order overwhelmingly likely to appear; the assertion is per round,
+    // so a regression that only mishandles the SIGSTOP order fails here rather than
+    // intermittently somewhere else.
+    constexpr int kRounds = 20;
+    for(int round = 0; round < kRounds; ++round)
+    {
+        RecordingDebugger debugger;
+        REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+        debugger.StartOnThread();
+
+        INFO("round " << round);
+        REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+
+        // Resumed, so the second signal of the handshake -- the one that arrives after the first
+        // stop in the SIGSTOP-first order -- has somewhere to land.
+        debugger.Continue();
+        REQUIRE(debugger.WaitFor(EventType::Resumed));
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        // Exactly one first stop, and nothing reported as an unexplained exception. A signal
+        // the handshake produced that reached cbException would be a stop nobody asked for and
+        // nobody would answer.
+        REQUIRE(debugger.count(EventType::SystemBreakpoint) == 1);
+        REQUIRE(debugger.count(EventType::Exception) == 0);
+    }
+}
