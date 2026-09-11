@@ -132,6 +132,26 @@ typedef struct
     uint64_t moduleBase;
 } DbgMemoryRegion;
 
+typedef struct
+{
+    uint64_t id;            /* the stable system thread id, what GetRegisters' threadId means */
+    uint64_t pc;            /* the program counter, pointer-authentication stripped on arm64 */
+    uint32_t runState;      /* TH_STATE_* as the kernel reports it */
+
+    /* runState as words, in static storage owned by the engine -- never null, never freed. */
+    const char* runStateName;
+
+    /* Whether this is the thread the current stop is on. MEASURED: the kernel's run state does
+       NOT answer that question. A thread parked in an unanswered exception reply reads as
+       TH_STATE_WAITING with a suspend count of 0, and so does every thread of a task that
+       Pause() has suspended -- the kernel describes what the thread was doing when it was
+       frozen, not that it is frozen. Only the engine knows, so the engine says. */
+    bool isStoppedThread;
+
+    /* Empty unless the thread named itself. Inline, so nothing has to be freed. */
+    char name[64];
+} DbgThread;
+
 typedef void (*DbgCbCreateProcess)(pid_t pid, uint64_t entryPoint, void* userdata);
 typedef void (*DbgCbExitProcess)(int exitCode, void* userdata);
 typedef void (*DbgCbSystemBreakpoint)(void* userdata);
@@ -202,6 +222,11 @@ typedef struct DbgEngine
     bool (*MemIsValidPtr)(void* impl, uint64_t addr);
     DbgStatus (*MemEnumRegions)(void* impl, DbgMemoryRegion* out, uint32_t capacity,
             uint32_t* count);
+
+    /* Fills up to `capacity` threads and writes how many exist through `count`. A caller that
+       gets `capacity` back should ask again with more room -- the same shape MemEnumRegions
+       uses, and for the same reason: the engine does not own a buffer on the caller's behalf. */
+    DbgStatus (*ThreadEnum)(void* impl, DbgThread* out, uint32_t capacity, uint32_t* count);
 
     DbgStatus (*ModBaseFromAddr)(void* impl, uint64_t addr, uint64_t* base);
     DbgStatus (*ModNameFromAddr)(void* impl, uint64_t addr, char* buf, uint64_t bufSize);

@@ -3,6 +3,7 @@
 #include <mach/mach.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace MachBug
@@ -45,6 +46,28 @@ namespace MachBug
         // already had when the engine arrived were not created under its watch, and reporting
         // them as appearances would put creations that never happened into a caller's list.
         Change Refresh(mach_port_t task);
+
+        struct Detail
+        {
+            uint64_t id = 0;
+            mach_port_t port = MACH_PORT_NULL;
+            std::string name;           // empty unless the thread named itself
+            int32_t runState = 0;       // TH_STATE_*, raw
+            const char* runStateName = "";
+        };
+
+        // What a thread list needs beyond an id. False for an id this object does not know.
+        //
+        // MEASURED, and a caller has to know it: the run state does NOT say whether the target
+        // is stopped. A thread parked in an unanswered exception reply -- the state every stop
+        // this engine creates produces -- reads as TH_STATE_WAITING with a suspend count of 0,
+        // and so does every thread of a task that Pause() has task_suspended. The kernel is
+        // describing what the thread was doing when it was frozen, not that it is frozen. Only
+        // the engine knows that, which is why the C API reports it separately.
+        bool Describe(uint64_t id, Detail* out) const;
+
+        // TH_STATE_* as words.
+        static const char* RunStateName(int32_t runState);
 
         // The port for a thread id, or MACH_PORT_NULL. The right is this object's; a caller uses
         // the port for the duration of a stop and does not release it.

@@ -1013,6 +1013,16 @@ namespace MachBug
         return mModules.Known().size();
     }
 
+    std::vector<uint64_t> Debugger::KnownThreads() const
+    {
+        return mThreads.Known();
+    }
+
+    bool Debugger::DescribeThread(const uint64_t threadId, Threads::Detail* const out) const
+    {
+        return mThreads.Describe(threadId, out);
+    }
+
     void Debugger::refreshThreads()
     {
         if(!mProcess)
