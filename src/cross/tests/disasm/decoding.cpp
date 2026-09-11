@@ -291,3 +291,91 @@ TEST_CASE("an instruction reports the registers it reads and writes")
         REQUIRE(writesEax);
     }
 }
+
+// --- Milestone 6 task 4: branch and flow information ---------------------------------------
+
+TEST_CASE("arm64 branches are classified, and only resolvable ones name a destination")
+{
+    Arm64Architecture architecture;
+    QCapstone disassembler(0, &architecture);
+
+    // b.eq +8 | b +8 | bl +8 | br x0 | blr x1 | ret, assembled at 0x1000.
+    const uint8_t code[] = {0x40, 0x00, 0x00, 0x54,   // b.eq  0x1008
+                            0x02, 0x00, 0x00, 0x14,   // b     0x100c
+                            0x02, 0x00, 0x00, 0x94,   // bl    0x1010
+                            0x00, 0x00, 0x1f, 0xd6,   // br    x0
+                            0x20, 0x00, 0x3f, 0xd6,   // blr   x1
+                            0xc0, 0x03, 0x5f, 0xd6};  // ret
+
+    const auto at = [&](duint rva) {
+        return disassembler.DisassembleAt(code + rva, sizeof(code) - rva, 0x1000, rva, false);
+    };
+
+    const Instruction_t conditional = at(0);
+    INFO("conditional: " << conditional.instStr.toStdString());
+    REQUIRE(conditional.branchType == Instruction_t::Conditional);
+    REQUIRE(conditional.branchDestination == 0x1008);
+
+    const Instruction_t unconditional = at(4);
+    REQUIRE(unconditional.branchType == Instruction_t::Unconditional);
+    REQUIRE(unconditional.branchDestination == 0x100c);
+
+    const Instruction_t call = at(8);
+    REQUIRE(call.branchType == Instruction_t::Call);
+    REQUIRE(call.branchDestination == 0x1010);
+
+    // The gap, asserted so that nobody later fills it with a guess. `br xN` and `blr xN` are
+    // everywhere in Apple code, and their target is a register value -- not knowable from the
+    // instruction. Note that `blr` reports CS_GRP_BRANCH_RELATIVE even though it is indirect,
+    // which is exactly why the destination is read from the operand type instead.
+    const Instruction_t indirectJump = at(12);
+    REQUIRE(indirectJump.branchType == Instruction_t::Unconditional);
+    REQUIRE(indirectJump.branchDestination == 0);
+
+    const Instruction_t indirectCall = at(16);
+    REQUIRE(indirectCall.branchType == Instruction_t::Call);
+    REQUIRE(indirectCall.branchDestination == 0);
+
+    const Instruction_t ret = at(20);
+    REQUIRE(ret.branchType == Instruction_t::None);
+    REQUIRE(ret.branchDestination == 0);
+}
+
+TEST_CASE("x86-64 branches are classified, and only resolvable ones name a destination")
+{
+    X86Architecture architecture;
+    QCapstone disassembler(0, &architecture);
+
+    // je +0 | jmp +0 | call +0 | jmp rax | call rbx | ret, assembled at 0x1000.
+    const uint8_t code[] = {0x74, 0x00,
+                            0xeb, 0x00,
+                            0xe8, 0x00, 0x00, 0x00, 0x00,
+                            0xff, 0xe0,
+                            0xff, 0xd3,
+                            0xc3};
+
+    const auto at = [&](duint rva) {
+        return disassembler.DisassembleAt(code + rva, sizeof(code) - rva, 0x1000, rva, false);
+    };
+
+    const Instruction_t conditional = at(0);
+    INFO("conditional: " << conditional.instStr.toStdString());
+    REQUIRE(conditional.branchType == Instruction_t::Conditional);
+    REQUIRE(conditional.branchDestination == 0x1002);
+
+    const Instruction_t unconditional = at(2);
+    REQUIRE(unconditional.branchType == Instruction_t::Unconditional);
+    REQUIRE(unconditional.branchDestination == 0x1004);
+
+    const Instruction_t call = at(4);
+    REQUIRE(call.branchType == Instruction_t::Call);
+    REQUIRE(call.branchDestination == 0x1009);
+
+    const Instruction_t indirectJump = at(9);
+    REQUIRE(indirectJump.branchType == Instruction_t::Unconditional);
+    REQUIRE(indirectJump.branchDestination == 0);
+
+    const Instruction_t indirectCall = at(11);
+    REQUIRE(indirectCall.branchType == Instruction_t::Call);
+    REQUIRE(indirectCall.branchDestination == 0);
+}
