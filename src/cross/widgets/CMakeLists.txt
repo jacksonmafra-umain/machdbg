@@ -1,11 +1,6 @@
 set(widgets_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../gui/Src")
 
 add_subdirectory(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../zydis_wrapper
-    ${CMAKE_CURRENT_BINARY_DIR}/zydis_wrapper
-)
-
-add_subdirectory(
     ${widgets_SOURCE_DIR}/ThirdPartyLibs/md4c
     ${CMAKE_CURRENT_BINARY_DIR}/md4c
 )
@@ -79,14 +74,11 @@ set(widgets_SOURCES
     ${widgets_SOURCE_DIR}/BasicView/StdTable.h
     ${widgets_SOURCE_DIR}/Disassembler/Architecture.cpp
     ${widgets_SOURCE_DIR}/Disassembler/Architecture.h
+    ${widgets_SOURCE_DIR}/Disassembler/Instruction.h
     ${widgets_SOURCE_DIR}/Disassembler/CapstoneTokenizer.cpp
     ${widgets_SOURCE_DIR}/Disassembler/CapstoneTokenizer.h
     ${widgets_SOURCE_DIR}/Disassembler/QCapstone.cpp
     ${widgets_SOURCE_DIR}/Disassembler/QCapstone.h
-    ${widgets_SOURCE_DIR}/Disassembler/QZydis.cpp
-    ${widgets_SOURCE_DIR}/Disassembler/QZydis.h
-    ${widgets_SOURCE_DIR}/Disassembler/ZydisTokenizer.cpp
-    ${widgets_SOURCE_DIR}/Disassembler/ZydisTokenizer.h
     ${widgets_SOURCE_DIR}/Gui/BrowseDialog.cpp
     ${widgets_SOURCE_DIR}/Gui/BrowseDialog.h
     ${widgets_SOURCE_DIR}/Gui/BrowseDialog.ui
@@ -165,7 +157,6 @@ target_compile_definitions(x64dbg_widgets PRIVATE
 
 target_link_libraries(x64dbg_widgets PUBLIC
     ${QT_LIBRARIES}
-    zydis_wrapper
     md4c-html
     PkgConfig::CAPSTONE
 )

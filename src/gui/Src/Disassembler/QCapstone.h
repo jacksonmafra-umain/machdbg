@@ -1,16 +1,15 @@
 #pragma once
 
+#include <QHash>
 #include <QString>
 #include <vector>
 
+#include <Utils/RichTextPainter.h>
+
 #include <capstone/capstone.h>
 
-// Instruction_t and the token types still live in QZydis.h/ZydisTokenizer.h. That is temporary
-// and ends at milestone 6 task 5, which retires Zydis and moves the shared struct; until then a
-// Capstone-based disassembler and a Zydis-based one have to agree about what an instruction is,
-// and the way to guarantee that is for both to use the same declaration rather than a copy.
 #include "CapstoneTokenizer.h"
-#include "QZydis.h"
+#include "Instruction.h"
 
 class Architecture;
 class EncodeMap;
@@ -96,3 +95,8 @@ private:
     // place, which is the allocation-free path Capstone documents for exactly this use.
     cs_insn* mScratch = nullptr;
 };
+
+// The opcode-bytes column's renderer. Declared here because QZydis.h, where it used to live, is
+// gone; the function itself never had anything to do with either disassembler.
+void formatOpcodeString(const Instruction_t & inst, RichTextPainter::List & list,
+                        std::vector<std::pair<size_t, bool>> & realBytes);

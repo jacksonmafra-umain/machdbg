@@ -60,9 +60,9 @@ static QString getDisassemblyMnemonicBrief(const Instruction_t & inst)
 {
     char brief[MAX_STRING_SIZE] = "";
     QString mnem;
-    for(const ZydisTokenizer::SingleToken & token : inst.tokens.tokens)
+    for(const CapstoneTokenizer::SingleToken & token : inst.tokens.tokens)
     {
-        if(token.type != ZydisTokenizer::TokenType::Space && token.type != ZydisTokenizer::TokenType::Prefix)
+        if(token.type != CapstoneTokenizer::TokenType::Space && token.type != CapstoneTokenizer::TokenType::Prefix)
         {
             mnem = token.text;
             break;

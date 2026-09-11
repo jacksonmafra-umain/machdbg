@@ -17,8 +17,8 @@
 #include "Accessible/AccessibleRegistersView.h"
 #include "Configuration.h"
 #include "MiscUtil.h"
-#include "Disassembler/ZydisTokenizer.h"
-#include "Disassembler/QZydis.h"
+#include "Disassembler/CapstoneTokenizer.h"
+#include "Disassembler/QCapstone.h"
 #ifdef X64DBG
 #include "CPUDisassembly.h"
 #include "CPUMultiDump.h"
@@ -2481,7 +2481,7 @@ void RegistersView::drawRegister(QPainter* p, REGISTER_NAME reg, char* value)
         uint8_t highlight = 0;
         for(const auto & reg : mHighlightRegs)
         {
-            if(!ZydisTokenizer::tokenTextPoolEquals(regName, reg.first))
+            if(!CapstoneTokenizer::tokenTextPoolEquals(regName, reg.first))
                 continue;
             highlight = reg.second;
             break;
@@ -2489,15 +2489,15 @@ void RegistersView::drawRegister(QPainter* p, REGISTER_NAME reg, char* value)
         if(highlight)
         {
             const char* name = "";
-            switch(highlight & ~(Zydis::RAIImplicit | Zydis::RAIExplicit))
+            switch(highlight & ~(RegisterAccessImplicit | RegisterAccessExplicit))
             {
-            case Zydis::RAIRead:
+            case RegisterAccessRead:
                 name = "RegistersHighlightReadColor";
                 break;
-            case Zydis::RAIWrite:
+            case RegisterAccessWrite:
                 name = "RegistersHighlightWriteColor";
                 break;
-            case Zydis::RAIRead | Zydis::RAIWrite:
+            case RegisterAccessRead | RegisterAccessWrite:
                 name = "RegistersHighlightReadWriteColor";
                 break;
             }
