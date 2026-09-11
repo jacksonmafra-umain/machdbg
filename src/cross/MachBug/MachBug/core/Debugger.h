@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include <MachBug/types/MachBug.h>
 #include <MachBug/types/Global.h>
@@ -184,6 +185,10 @@ namespace MachBug
         // same reason ThreadCount() is not: the engine looks when it stops the target, because
         // that is the only moment it can act on what it sees.
         std::size_t ModuleCount() const;
+
+        // The images the target had loaded at the last stop. What a memory map correlates its
+        // regions against, and what the C API's module enumeration answers with.
+        std::vector<Modules::Image> LoadedModules() const;
 
         // How many threads the target had at the last stop. Not a live query: the engine looks
         // when it stops the target, because that is the only moment it can act on what it sees.

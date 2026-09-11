@@ -189,6 +189,37 @@ namespace MachBug::memory
         return regionAt(task, address, out, false, error);
     }
 
+    const char* TagName(const uint32_t tag)
+    {
+        switch(tag)
+        {
+        // Not "unknown": measured to be what the main executable's own __TEXT carries, along
+        // with every other ordinary mapped file. Calling it unknown would hide the one row a
+        // user goes looking for first.
+        case 0:                       return "untagged";
+        case VM_MEMORY_MALLOC:        return "malloc";
+        case VM_MEMORY_MALLOC_SMALL:  return "malloc (small)";
+        case VM_MEMORY_MALLOC_LARGE:  return "malloc (large)";
+        case VM_MEMORY_MALLOC_HUGE:   return "malloc (huge)";
+        case VM_MEMORY_MALLOC_TINY:   return "malloc (tiny)";
+        case VM_MEMORY_MALLOC_NANO:   return "malloc (nano)";
+        case VM_MEMORY_REALLOC:       return "realloc";
+        case VM_MEMORY_STACK:         return "stack";
+        case VM_MEMORY_GUARD:         return "guard";
+        case VM_MEMORY_DYLIB:         return "dylib";
+        case VM_MEMORY_DYLD:          return "dyld";
+        case VM_MEMORY_DYLD_MALLOC:   return "dyld (malloc)";
+        case VM_MEMORY_SHARED_PMAP:   return "shared pmap";
+        case VM_MEMORY_UNSHARED_PMAP: return "unshared pmap";
+        case VM_MEMORY_OS_ALLOC_ONCE: return "os alloc once";
+        case VM_MEMORY_FOUNDATION:    return "Foundation";
+        case VM_MEMORY_COREGRAPHICS:  return "CoreGraphics";
+        case VM_MEMORY_COREDATA:      return "Core Data";
+        case VM_MEMORY_JAVASCRIPT_CORE: return "JavaScriptCore";
+        default:                      return "other";
+        }
+    }
+
     uint32_t EnumRegions(const mach_port_t task, Region* out, const uint32_t capacity)
     {
         if(task == MACH_PORT_NULL || !out || capacity == 0)
@@ -196,18 +227,49 @@ namespace MachBug::memory
 
         uint32_t written = 0;
         mach_vm_address_t address = 0;
+        natural_t depth = 0;
+
         while(written < capacity)
         {
+            mach_vm_size_t size = 0;
+            vm_region_submap_info_data_64_t info{};
+            mach_msg_type_number_t count = VM_REGION_SUBMAP_INFO_COUNT_64;
+
+            if(mach_vm_region_recurse(task, &address, &size, &depth,
+                                      reinterpret_cast<vm_region_recurse_info_t>(&info),
+                                      &count) != KERN_SUCCESS)
+            {
+                break;   // past the end of the address space, which is how this walk finishes
+            }
+
+            // A submap is a map inside the map -- the shared cache is one, and it is most of
+            // what any process has mapped. Descending into it at the same address is the whole
+            // reason this walks with the recursive call: reported as one opaque region, the
+            // cache would be a single row covering gigabytes and naming nothing.
+            if(info.is_submap)
+            {
+                ++depth;
+                continue;
+            }
+
             Region region{};
-            std::string ignored;
-            // The tag is asked for here and nowhere else: enumeration is what feeds a memory map.
-            if(!regionAt(task, address, &region, true, &ignored))
-                break;
+            region.base = address;
+            region.size = size;
+            region.protection = static_cast<uint32_t>(info.protection);
+            region.maxProtection = static_cast<uint32_t>(info.max_protection);
+            region.userTag = info.user_tag;
+            region.depth = depth;
+            region.isSubmap = false;
+            region.tagName = TagName(info.user_tag);
             out[written++] = region;
-            const mach_vm_address_t next = region.base + region.size;
-            if(next <= address) // No forward progress: stop rather than spin.
+
+            const mach_vm_address_t next = address + size;
+            if(next <= address)   // No forward progress: stop rather than spin.
                 break;
             address = next;
+            // Back to the top of the map for the next address: a depth left over from the
+            // submap just finished would skip whatever the outer map has next.
+            depth = 0;
         }
         return written;
     }

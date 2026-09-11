@@ -36,6 +36,7 @@
 #include <MachBug/api/machbug_api.h>
 #include <MachBug/arch/Arch.h>
 #include <MachBug/core/Debugger.h>
+#include <MachBug/core/Modules.h>
 #include <MachBug/memory/Memory.h>
 
 #include <mach/vm_prot.h>
@@ -505,10 +506,30 @@ namespace
         std::vector<MachBug::memory::Region> regions(capacity);
         const uint32_t found = MachBug::memory::EnumRegions(engine->GetTaskPort(), regions.data(),
                                                             capacity);
+
+        // The correlation happens here rather than in memory/: that layer reports what the
+        // kernel says about an address space, and what dyld loaded where is a different source
+        // of truth. Keeping them apart is what lets the parser and the map be tested without
+        // each other.
+        const std::vector<MachBug::Modules::Image> modules = engine->LoadedModules();
+        const auto moduleAt = [&modules](const uint64_t address) -> uint64_t {
+            for(const MachBug::Modules::Image& image : modules)
+            {
+                if(image.size != 0 && address >= image.loadAddress &&
+                   address < image.loadAddress + image.size)
+                {
+                    return image.loadAddress;
+                }
+            }
+            return 0;
+        };
+
         for(uint32_t i = 0; i < found; ++i)
         {
             out[i] = DbgMemoryRegion{regions[i].base, regions[i].size, regions[i].protection,
-                                     regions[i].maxProtection, regions[i].userTag};
+                                     regions[i].maxProtection, regions[i].userTag,
+                                     regions[i].depth, regions[i].tagName,
+                                     moduleAt(regions[i].base)};
         }
         if(count)
             *count = found;

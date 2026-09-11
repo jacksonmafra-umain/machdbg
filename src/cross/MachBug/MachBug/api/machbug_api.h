@@ -114,6 +114,22 @@ typedef struct
     uint32_t protection;    /* current protection, VM_PROT_* bits */
     uint32_t maxProtection;
     uint32_t userTag;       /* VM_MEMORY_* */
+    uint32_t depth;         /* 0 for the task's own map, deeper inside a submap */
+
+    /* A readable name for userTag, in static storage owned by the engine -- never null, valid
+       for the life of the process, and never freed by the caller. "untagged" rather than
+       "unknown" for tag 0: measured, that is what an executable's own __TEXT carries. */
+    const char* tagName;
+
+    /* The load address of the module this region belongs to, or 0 for a region that belongs to
+       none. NOT derived from userTag -- the main executable's __TEXT is untagged, so a map that
+       trusted the tag would leave the one row a user looks for first unattributed.
+
+       Zero for every region at the target's FIRST stop, and that is not a bug: dyld publishes
+       its image list as it goes, and the first stop happens before any of it exists (see
+       core/Modules.h). A caller that draws a memory map there gets tags and protections but no
+       module names, and gets them at the next stop. */
+    uint64_t moduleBase;
 } DbgMemoryRegion;
 
 typedef void (*DbgCbCreateProcess)(pid_t pid, uint64_t entryPoint, void* userdata);

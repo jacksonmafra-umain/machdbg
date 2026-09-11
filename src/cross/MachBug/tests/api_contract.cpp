@@ -888,3 +888,123 @@ TEST_CASE("the breakpoint entries refuse a target that is not there, by name")
 
     MachBugDestroy(engine);
 }
+
+TEST_CASE("the memory map names the module a region belongs to")
+{
+    BreakpointHarness harness;
+    DbgEngineCallbacks callbacks{};
+    callbacks.onSystemBreakpoint = onBreakpointHarnessSystemBreakpoint;
+    callbacks.onBreakpoint = onBreakpointHarnessBreakpoint;
+    callbacks.userdata = &harness;
+
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+
+    const std::string path = FIXTURE("known_function");
+    DbgLaunchSpec spec{};
+    spec.path = path.c_str();
+
+    // A breakpoint stop, not a Pause, and for two reasons that both matter here. A Pause is a
+    // task_suspend with no exception behind it, so there is no stopped thread and threadId 0
+    // names nothing -- registers cannot be read from it. And this stop is after the target has
+    // reached its own code, so dyld has published the image list a region needs to be
+    // attributed to a module at all.
+    char outPathTemplate[] = "/tmp/machbug_contract_map.XXXXXX";
+    const int outFd = mkstemp(outPathTemplate);
+    REQUIRE(outFd != -1);
+    const std::string outPath = outPathTemplate;
+    const int savedStdout = dup(STDOUT_FILENO);
+    REQUIRE(savedStdout != -1);
+    std::fflush(stdout);
+    dup2(outFd, STDOUT_FILENO);
+
+    std::thread startThread([&] {
+        engine->Start(engine->impl, &spec);
+        harness.startReturned.store(true, std::memory_order_release);
+    });
+
+    for(int i = 0; i < 500 && !harness.stopped.load(std::memory_order_acquire) &&
+                   !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool stopped = harness.stopped.load(std::memory_order_acquire);
+
+    engine->Continue(engine->impl);
+
+    uint64_t functionAddress = 0;
+    for(int i = 0; i < 500 && functionAddress == 0; ++i)
+    {
+        if(FILE* captured = std::fopen(outPath.c_str(), "r"))
+        {
+            unsigned long long printed = 0;
+            if(std::fscanf(captured, "%llx", &printed) == 1)
+                functionAddress = printed;
+            std::fclose(captured);
+        }
+        if(functionAddress == 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    std::fflush(stdout);
+    dup2(savedStdout, STDOUT_FILENO);
+    close(savedStdout);
+    close(outFd);
+    unlink(outPath.c_str());
+
+    engine->Pause(engine->impl);
+    const DbgStatus setResult =
+        engine->SetBreakpoint(engine->impl, DbgBreakpointKind_Software, functionAddress, 0);
+    engine->Continue(engine->impl);
+    for(int i = 0; i < 500 && harness.hits.load(std::memory_order_acquire) == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool hit = harness.hits.load(std::memory_order_acquire) > 0;
+
+    DbgRegisters regs{};
+    const DbgStatus registersResult = engine->GetRegisters(engine->impl, 0, &regs);
+    const DbgArch arch = engine->GetArch(engine->impl);
+    const uint64_t pc = arch == DbgArch_Arm64 ? regs.arm64.pc : regs.x86_64.rip;
+
+    std::vector<DbgMemoryRegion> regions(512);
+    uint32_t count = 0;
+    const DbgStatus enumResult = engine->MemEnumRegions(engine->impl, regions.data(),
+                                                        static_cast<uint32_t>(regions.size()),
+                                                        &count);
+
+    const DbgMemoryRegion* holdingPc = nullptr;
+    bool everyTagNamed = true;
+    for(uint32_t i = 0; i < count; ++i)
+    {
+        if(regions[i].tagName == nullptr || regions[i].tagName[0] == '\0')
+            everyTagNamed = false;
+        if(pc >= regions[i].base && pc < regions[i].base + regions[i].size)
+            holdingPc = &regions[i];
+    }
+
+    engine->Stop(engine->impl);
+    for(int i = 0; i < 500 && !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if(harness.startReturned.load(std::memory_order_acquire))
+        startThread.join();
+    else
+        startThread.detach();
+
+    INFO("last engine diagnostic: " << DbgLastErrorString());
+    REQUIRE(stopped);
+    REQUIRE(functionAddress != 0);
+    REQUIRE(setResult == DbgStatus_Ok);
+    REQUIRE(hit);
+    REQUIRE(registersResult == DbgStatus_Ok);
+    REQUIRE(enumResult == DbgStatus_Ok);
+    REQUIRE(count > 0);
+    REQUIRE(everyTagNamed);
+
+    REQUIRE(holdingPc != nullptr);
+    INFO("the program counter is in a region at 0x" << std::hex << holdingPc->base
+         << " tagged " << holdingPc->tagName << ", module base 0x" << holdingPc->moduleBase);
+    // The region the target is executing in belongs to a module, and the engine says which. Its
+    // tag is 0 -- measured -- so an implementation that read the module out of the tag would
+    // answer zero here and look like it had simply found nothing.
+    REQUIRE(holdingPc->moduleBase != 0);
+    REQUIRE(holdingPc->moduleBase <= pc);
+
+    MachBugDestroy(engine);
+}

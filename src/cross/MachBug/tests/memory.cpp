@@ -13,7 +13,9 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <vector>
 #include <thread>
 
 #include <MachBug/arch/Arch.h>
@@ -217,4 +219,39 @@ TEST_CASE("region enumeration finds the region the program counter is in")
 
     // Capacity is honoured rather than overrun: asking for one region returns one.
     REQUIRE(MachBug::memory::EnumRegions(debugger.GetTaskPort(), regions, 1) == 1);
+}
+
+TEST_CASE("every region carries a readable tag, and tag zero is not called unknown")
+{
+    RecordingDebugger debugger;
+    REQUIRE(debugger.Init(FIXTURE("run_endlessly").c_str()));
+    debugger.StartOnThread();
+    REQUIRE(debugger.WaitFor(EventType::SystemBreakpoint));
+
+    std::vector<MachBug::memory::Region> regions(512);
+    const uint32_t found = MachBug::memory::EnumRegions(debugger.GetTaskPort(), regions.data(),
+                                                        static_cast<uint32_t>(regions.size()));
+    INFO(found << " regions");
+    REQUIRE(found > 0);
+
+    bool sawStack = false;
+    bool sawUntagged = false;
+    for(uint32_t i = 0; i < found; ++i)
+    {
+        INFO("region " << i << " at 0x" << std::hex << regions[i].base
+             << " tag " << std::dec << regions[i].userTag);
+        REQUIRE(regions[i].tagName != nullptr);
+        REQUIRE(std::strlen(regions[i].tagName) > 0);
+        if(regions[i].userTag == VM_MEMORY_STACK)
+            sawStack = true;
+        if(regions[i].userTag == 0)
+            sawUntagged = true;
+    }
+
+    // Both are measured facts about any real process: it has a stack, and its own mapped file
+    // content carries no tag at all.
+    REQUIRE(sawStack);
+    REQUIRE(sawUntagged);
+    REQUIRE(std::string(MachBug::memory::TagName(0)) == "untagged");
+    REQUIRE(std::string(MachBug::memory::TagName(VM_MEMORY_STACK)) == "stack");
 }
