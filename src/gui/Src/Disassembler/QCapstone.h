@@ -82,7 +82,6 @@ private:
     Architecture* mArchitecture = nullptr;
     QHash<ENCODETYPE, DataInstructionInfo> mDataInstMap;
     bool mLongDataInst = false;
-    bool mUseRunTrace = false;
     EncodeMap* mEncodeMap = nullptr;
     CodeFoldingHelper* mCodeFoldingManager = nullptr;
 

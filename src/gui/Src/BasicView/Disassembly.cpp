@@ -8,12 +8,13 @@
 #include <Memory/MemoryPage.h>
 #include <Gui/DisassemblyPopup.h>
 
-Disassembly::Disassembly(Architecture* architecture, bool isMain, QWidget* parent)
+Disassembly::Disassembly(Architecture* architecture, bool isMain, QWidget* parent,
+                         MemoryPage* memPage)
     : AbstractTableView(parent),
       mArchitecture(architecture),
       mIsMain(isMain)
 {
-    mMemPage = new MemoryPage(0, 0);
+    mMemPage = memPage != nullptr ? memPage : new MemoryPage(0, 0);
 
     mInstBuffer.clear();
     setDrawDebugOnly(true);
@@ -234,6 +235,15 @@ static void mnemonicBriefRichText(RichTextPainter::List & richText, const Instru
 QString Disassembly::paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h)
 {
     auto rowOffset = row - getTableOffset();
+
+    // Nothing prepared for this row, so nothing to paint. prepareData() fills at most a
+    // screenful and stops early whenever the walk cannot advance -- at the end of a mapping, or
+    // before a target has been stopped at all -- while the table's row count comes from the
+    // page's size in bytes and keeps asking for rows regardless. Without this the next line
+    // indexes past the buffer and Qt aborts the process on an out-of-range QList::at, which is
+    // how machdbg's disassembly pane crashed the first time it was shown a live target.
+    if(rowOffset >= duint(mInstBuffer.size()))
+        return QString();
 
     if(mHighlightingMode)
     {

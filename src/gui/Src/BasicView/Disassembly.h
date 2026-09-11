@@ -13,7 +13,12 @@ class Disassembly : public AbstractTableView
 {
     Q_OBJECT
 public:
-    Disassembly(Architecture* architecture, bool isMain, QWidget* parent = nullptr);
+    // `memPage` follows HexDump's shape: if it is given, this view takes ownership of it and
+    // deletes it, which is how a caller points the view at something other than a plain
+    // MemoryPage -- an engine-backed one, for instance. Null keeps the original behaviour of
+    // making its own.
+    Disassembly(Architecture* architecture, bool isMain, QWidget* parent = nullptr,
+                MemoryPage* memPage = nullptr);
     ~Disassembly() override;
     Architecture* getArchitecture() const;
 
