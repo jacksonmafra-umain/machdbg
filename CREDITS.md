@@ -18,6 +18,8 @@ They wrote the x64dbg codebase this fork is built upon: mrexodia (Duncan Ogilvie
 
 TitanEngine Community Edition, Zydis, GleeBug, XEDParse, asmjit, Scylla, Jansson, lz4, the bug icon by VisualPharm, interface icons by Fugue, and the website by tr4ceflow.
 
+This port additionally builds on **Capstone** (BSD-3-Clause), which replaces Zydis as the disassembly engine from milestone 6 onward.
+
 Some of these relics no longer reside within machdbg. They remain credited because the dark logic forged around them still endures.
 
 ## Tested Servants (Reference Plugins)

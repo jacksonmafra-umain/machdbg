@@ -56,7 +56,7 @@ jobs:
       # in the fixtures' signing behind elevated privilege.
       - name: Build the contract tests
         working-directory: src/cross
-        run: cmake --build build/macos-arm64 --target MachBug_tests
+        run: cmake --build build/macos-arm64 --target MachBug_tests machdbg_disasm_tests
 
       # Bounded separately from the build above, and tightly: a normal run finishes in
       # seconds. Milestone 2 task 6 found (and fixed) one real blocking-wait bug that could
@@ -70,6 +70,14 @@ jobs:
         working-directory: src/cross
         timeout-minutes: 3
         run: ./build/macos-arm64/tests/MachBug_tests
+
+      # The disassembler's own tests, separate because they link the widgets library and
+      # therefore Qt -- the engine suite above deliberately does not, so that it keeps running
+      # where no Qt is installed.
+      - name: Run the disassembler tests
+        working-directory: src/cross
+        timeout-minutes: 3
+        run: ./build/macos-arm64/tests/disasm/machdbg_disasm_tests
 
       # The view, checked the only way a job can check one. A screenshot proves a populated
       # register table to a person and nothing here; these two run the whole app offscreen

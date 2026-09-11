@@ -1,0 +1,32 @@
+# Reference: https://build-cpp.github.io/cmkr/cmake-toml
+#
+# The disassembler's tests. Separate from MachBug_tests because this half needs the widgets
+# library -- and therefore Qt -- while the engine suite deliberately does not: a console test
+# binary that links Qt cannot run on a machine with no Qt, and the engine's coverage must not
+# depend on one.
+[cmake]
+version = "3.19"
+cmkr-include = false
+
+[project]
+name = "machdbg_disasm_tests"
+languages = ["CXX"]
+
+[fetch-content.Catch2]
+git = "https://github.com/catchorg/Catch2"
+tag = "v3.14.0"
+shallow = true
+
+[target.machdbg_disasm_tests]
+type = "executable"
+sources = ["capstone_available.cpp"]
+compile-features = ["cxx_std_17"]
+# ../../widgets for CapstoneVersion.h, which is where the port's own headers live.
+include-directories = ["../../widgets"]
+link-libraries = ["x64dbg_widgets", "Catch2::Catch2WithMain"]
+properties.RUNTIME_OUTPUT_DIRECTORY = "${CMAKE_BINARY_DIR}/tests/disasm"
+cmake-after = """
+list(APPEND CMAKE_MODULE_PATH "${catch2_SOURCE_DIR}/extras")
+include(Catch)
+catch_discover_tests(machdbg_disasm_tests)
+"""

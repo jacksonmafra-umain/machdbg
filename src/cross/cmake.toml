@@ -162,3 +162,9 @@ condition = "macos"
 
 [subdir."MachBug/tests"]
 condition = "machbug-tests"
+
+# The disassembler's tests live apart from the engine's because they need the widgets library,
+# and therefore Qt: the engine suite is a console binary that has to run where no Qt is
+# installed.
+[subdir."tests/disasm"]
+condition = "machbug-tests"
