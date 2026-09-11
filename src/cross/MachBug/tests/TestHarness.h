@@ -70,6 +70,8 @@ namespace MachBug::test
         Breakpoint,
         ThreadCreate,
         ThreadExit,
+        LoadModule,
+        UnloadModule,
         Exception,
         InternalError,
     };
@@ -91,6 +93,11 @@ namespace MachBug::test
         // thread port and is what ResolveThread() accepts.
         uint64_t threadId = 0;
         std::string message;
+        // Populated only for LoadModule/UnloadModule: the image's load address, with its path in
+        // `message` for a load. Last in the struct deliberately -- the pushes above initialise
+        // Event positionally, and a field added in the middle would silently shift every one of
+        // them.
+        uint64_t moduleBase = 0;
     };
 
     class RecordingDebugger : public Debugger
@@ -280,6 +287,21 @@ namespace MachBug::test
         void cbBreakpoint(uint64_t address) override
         {
             push({EventType::Breakpoint, {}, 0, 0, 0, address, 0, {}});
+        }
+
+        void cbLoadModule(uint64_t base, const std::string& path) override
+        {
+            Event event{EventType::LoadModule};
+            event.moduleBase = base;
+            event.message = path;
+            push(std::move(event));
+        }
+
+        void cbUnloadModule(uint64_t base) override
+        {
+            Event event{EventType::UnloadModule};
+            event.moduleBase = base;
+            push(std::move(event));
         }
 
         void cbThreadCreate(uint64_t threadId) override

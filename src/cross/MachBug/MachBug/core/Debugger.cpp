@@ -272,6 +272,11 @@ namespace MachBug
         // live thread, and those rights belong to a task that is about to stop existing.
         mThreads.Reset();
 
+        // And the module list, for the same reason: it describes a target that is going away,
+        // and carrying it into the next one would report a fresh process as having loaded
+        // nothing while listing the previous process's libraries.
+        mModules.Reset();
+
         // Process::DetachAndKill(), not a bare kill()+waitpid(): if Start() ran, or this pid was
         // taken by Attach() (which ptrace(PT_ATTACHEXC)'s it directly, without waiting for
         // Start()), this pid is ptrace(PT_ATTACHEXC)'d (Debugger.Loop.cpp::Start(), or Attach()

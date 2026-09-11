@@ -72,6 +72,11 @@ type = "machbug_fixture"
 sources = ["targets/writes_a_global.cpp"]
 properties.OUTPUT_NAME = "writes_a_global"
 
+[target.machbug_fixture_loads_a_library]
+type = "machbug_fixture"
+sources = ["targets/loads_a_library.cpp"]
+properties.OUTPUT_NAME = "loads_a_library"
+
 [target.machbug_fixture_crash_bad_access]
 type = "machbug_fixture"
 sources = ["targets/crash_bad_access.cpp"]
@@ -133,6 +138,7 @@ add_dependencies(MachBug_tests
     machbug_fixture_known_function
     machbug_fixture_multi_threaded
     machbug_fixture_writes_a_global
+    machbug_fixture_loads_a_library
     machbug_fixture_crash_bad_access
     machbug_fixture_no_get_task_allow
 )
