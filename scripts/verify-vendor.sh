@@ -84,6 +84,9 @@ required=(
     src/cross/MachBug/MachBug/macho/Image.h
     src/cross/MachBug/MachBug/macho/Image.cpp
     src/cross/MachBug/tests/macho_image.cpp
+    src/cross/MachBug/MachBug/core/Modules.h
+    src/cross/MachBug/MachBug/core/Modules.cpp
+    src/cross/MachBug/tests/modules.cpp
     src/cross/MachBug/tests/targets/writes_a_global.cpp
     src/cross/views/cmake.toml
     src/cross/views/CMakeLists.txt
