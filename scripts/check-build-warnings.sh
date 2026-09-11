@@ -10,7 +10,20 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 TEMP_BUILD="$(mktemp -d)"
-trap "rm -rf '$TEMP_BUILD'" EXIT
+
+# Removed on success only. A failing run's build directory holds build.ninja and the exact link
+# commands, which is the evidence issue #32 needed and did not have: the one time deployment
+# targets came back mixed, the directory and the log were both gone before anyone could read
+# them, and three clean reruns proved only that a later build was clean.
+keep_evidence=0
+cleanup() {
+    if [[ "$keep_evidence" -eq 1 ]]; then
+        echo "Build directory kept for investigation: $TEMP_BUILD"
+        return
+    fi
+    rm -rf "$TEMP_BUILD"
+}
+trap cleanup EXIT
 
 # A fixed log path is overwritten by the very next run, destroying the evidence a surprising
 # result needs to be investigated. Give each invocation its own path — and, unlike TEMP_BUILD,
@@ -30,6 +43,50 @@ cmake --preset macos-arm64 -B "$TEMP_BUILD" >/dev/null
 echo "Building all four targets (hex_viewer, minidump, remote_table, release_notes)..."
 cmake --build "$TEMP_BUILD" --target hex_viewer minidump remote_table release_notes 2>&1 \
   | tee "$LOG_FILE" >/dev/null
+
+# The deployment target every produced binary reports, which is the other half of issue #32.
+# A mixed build is not a linker-warning problem and would otherwise pass this check entirely:
+# the warnings could be exactly the documented two while the objects behind them were compiled
+# against different minimums. minos, not the SDK version -- the SDK says nothing about the
+# oldest OS a binary will run on.
+echo "Checking deployment targets..."
+
+# Every Mach-O the build produced -- the objects as well as the linked executables. The objects
+# are the point: #32 reported targets disagreeing *within* a build, and checking only what came
+# out of the linker would report one minimum per binary and miss it entirely. A full scan of a
+# four-target build is under three seconds.
+# _cmkr_* is excluded, and the exclusion is narrow on purpose: it is cmkr's own bootstrap, a
+# tool compiled to run on this machine during the build and never shipped, so it legitimately
+# targets the host (26.0 here) while everything that ships targets 14.0. Found by this check
+# firing on its first real run -- one object out of 97, and not the bug. Everything under
+# _deps/ stays in scope: that code is linked into the apps.
+mach_o_files="$(mktemp)"
+find "$TEMP_BUILD" -name '*.o' -type f -not -path '*/_cmkr_*' > "$mach_o_files"
+find "$TEMP_BUILD" -path '*/Contents/MacOS/*' -type f -perm -111 >> "$mach_o_files"
+
+distinct_minimums="$(xargs -n1 -P8 vtool -show-build < "$mach_o_files" 2>/dev/null \
+    | awk '/minos/ { print $2 }' | sort -u)"
+scanned="$(grep -c . "$mach_o_files" || true)"
+rm -f "$mach_o_files"
+
+if [ "$(printf '%s' "$distinct_minimums" | grep -c .)" -gt 1 ]; then
+    keep_evidence=1
+    echo "FAIL this build produced Mach-O files with more than one deployment target:"
+    printf '%s\n' "$distinct_minimums" | sed 's/^/  macOS /'
+    echo ""
+    echo "This is issue #32 reproducing. The build directory and the log below are the evidence"
+    echo "the investigation has never had -- do not delete them."
+    echo "Full build log kept at: $LOG_FILE"
+    exit 1
+fi
+
+if [ -n "$distinct_minimums" ]; then
+    echo "ok all $scanned Mach-O files target macOS $distinct_minimums"
+else
+    echo "FAIL no Mach-O file in the build reported a deployment target at all"
+    keep_evidence=1
+    exit 1
+fi
 
 # Extract libraries from warnings
 echo "Analyzing warnings..."
@@ -56,6 +113,7 @@ fi
 UNEXPECTED=$(comm -23 <(printf '%s\n' "$ACTUAL" | sed '/^$/d') <(printf '%s\n' "$EXPECTED" | sed '/^$/d'))
 MISSING=$(comm -13 <(printf '%s\n' "$ACTUAL" | sed '/^$/d') <(printf '%s\n' "$EXPECTED" | sed '/^$/d'))
 
+keep_evidence=1
 echo "FAIL the observed linker warnings do not match the documented exception."
 
 if [ -n "$UNEXPECTED" ]; then
