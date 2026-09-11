@@ -79,6 +79,8 @@ set(widgets_SOURCES
     ${widgets_SOURCE_DIR}/BasicView/StdTable.h
     ${widgets_SOURCE_DIR}/Disassembler/Architecture.cpp
     ${widgets_SOURCE_DIR}/Disassembler/Architecture.h
+    ${widgets_SOURCE_DIR}/Disassembler/CapstoneTokenizer.cpp
+    ${widgets_SOURCE_DIR}/Disassembler/CapstoneTokenizer.h
     ${widgets_SOURCE_DIR}/Disassembler/QCapstone.cpp
     ${widgets_SOURCE_DIR}/Disassembler/QCapstone.h
     ${widgets_SOURCE_DIR}/Disassembler/QZydis.cpp

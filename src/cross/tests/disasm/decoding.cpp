@@ -116,3 +116,178 @@ TEST_CASE("the backward walk terminates on undecodable bytes")
     INFO("landed at " << landed);
     REQUIRE(landed <= 200);
 }
+
+// --- Milestone 6 task 3: the token stream -------------------------------------------------
+//
+// These assert on CLASSIFICATION, not on rendered text. A test that compared strings would pass
+// just as well against re-lexing Capstone's printed output, which is the design the spec
+// rejected: an immediate re-lexed out of text is an anonymous number and a register is a word.
+
+namespace
+{
+    using TokenType = ZydisTokenizer::TokenType;
+
+    bool hasType(const ZydisTokenizer::InstructionToken& tokens, const TokenType type)
+    {
+        for(const auto& token : tokens.tokens)
+        {
+            if(token.type == type)
+                return true;
+        }
+        return false;
+    }
+
+    TokenType typeOfText(const ZydisTokenizer::InstructionToken& tokens, const QString& text)
+    {
+        for(const auto& token : tokens.tokens)
+        {
+            if(token.text == text)
+                return token.type;
+        }
+        return TokenType::Last;
+    }
+
+    duint valueOfType(const ZydisTokenizer::InstructionToken& tokens, const TokenType type)
+    {
+        for(const auto& token : tokens.tokens)
+        {
+            if(token.type == type)
+                return token.value.value;
+        }
+        return 0;
+    }
+
+    QString render(const ZydisTokenizer::InstructionToken& tokens)
+    {
+        QString out;
+        for(const auto& token : tokens.tokens)
+            out += token.text;
+        return out;
+    }
+}
+
+TEST_CASE("an arm64 load classifies its register, its memory operator and its immediate")
+{
+    Arm64Architecture architecture;
+    QCapstone disassembler(0, &architecture);
+
+    // ldr x0, [x1, #8]
+    const uint8_t code[] = {0x20, 0x04, 0x40, 0xf9};
+    const Instruction_t inst = disassembler.DisassembleAt(code, sizeof(code), 0x1000, 0, false);
+    INFO("decoded: " << inst.instStr.toStdString() << " tokens: " << render(inst.tokens).toStdString());
+
+    REQUIRE(typeOfText(inst.tokens, "x0") == TokenType::GeneralRegister);
+    REQUIRE(typeOfText(inst.tokens, "x1") == TokenType::MemoryBaseRegister);
+    REQUIRE(hasType(inst.tokens, TokenType::MemoryBrackets));
+    REQUIRE(valueOfType(inst.tokens, TokenType::Address) == 8);
+}
+
+TEST_CASE("an arm64 stack pair is classified as a push or pop, not as an ordinary mnemonic")
+{
+    Arm64Architecture architecture;
+    QCapstone disassembler(0, &architecture);
+
+    // stp x29, x30, [sp, #-0x10]!  -- the prologue the spec names as an analysis heuristic.
+    const uint8_t code[] = {0xfd, 0x7b, 0xbf, 0xa9};
+    const Instruction_t inst = disassembler.DisassembleAt(code, sizeof(code), 0x1000, 0, false);
+    INFO("tokens: " << render(inst.tokens).toStdString());
+    REQUIRE(typeOfText(inst.tokens, "stp") == TokenType::MnemonicPushPop);
+}
+
+TEST_CASE("an x86-64 memory operand classifies its base, its scale and its displacement")
+{
+    X86Architecture architecture;
+    QCapstone disassembler(0, &architecture);
+
+    // mov eax, dword ptr [rbx + rcx*4 + 0x10]
+    const uint8_t code[] = {0x8b, 0x44, 0x8b, 0x10};
+    const Instruction_t inst = disassembler.DisassembleAt(code, sizeof(code), 0x1000, 0, false);
+    INFO("decoded: " << inst.instStr.toStdString() << " tokens: " << render(inst.tokens).toStdString());
+
+    REQUIRE(typeOfText(inst.tokens, "eax") == TokenType::GeneralRegister);
+    REQUIRE(typeOfText(inst.tokens, "rbx") == TokenType::MemoryBaseRegister);
+    REQUIRE(typeOfText(inst.tokens, "rcx") == TokenType::MemoryIndexRegister);
+    REQUIRE(hasType(inst.tokens, TokenType::MemoryScale));
+    REQUIRE(valueOfType(inst.tokens, TokenType::Address) == 0x10);
+}
+
+TEST_CASE("an immediate carries its value, not only its text")
+{
+    X86Architecture architecture;
+    QCapstone disassembler(0, &architecture);
+
+    // mov eax, 0x2a
+    const uint8_t code[] = {0xb8, 0x2a, 0x00, 0x00, 0x00};
+    const Instruction_t inst = disassembler.DisassembleAt(code, sizeof(code), 0x1000, 0, false);
+    INFO("tokens: " << render(inst.tokens).toStdString());
+    // The number is in the token. Recovering it from the text is the re-lexing this design
+    // exists to avoid, so a token that renders "0x2a" and carries 0 would be a failure.
+    REQUIRE(valueOfType(inst.tokens, TokenType::Value) == 0x2a);
+}
+
+TEST_CASE("a call and a return are classified by what they do, on both architectures")
+{
+    {
+        X86Architecture architecture;
+        QCapstone disassembler(0, &architecture);
+        const uint8_t call[] = {0xe8, 0x00, 0x00, 0x00, 0x00};   // call +0
+        const uint8_t ret[] = {0xc3};                             // ret
+        REQUIRE(typeOfText(disassembler.DisassembleAt(call, sizeof(call), 0x1000, 0, false).tokens,
+                           "call") == TokenType::MnemonicCall);
+        REQUIRE(typeOfText(disassembler.DisassembleAt(ret, sizeof(ret), 0x1000, 0, false).tokens,
+                           "ret") == TokenType::MnemonicRet);
+    }
+    {
+        Arm64Architecture architecture;
+        QCapstone disassembler(0, &architecture);
+        const uint8_t bl[] = {0x01, 0x00, 0x00, 0x94};   // bl +4
+        const uint8_t ret[] = {0xc0, 0x03, 0x5f, 0xd6};  // ret
+        REQUIRE(typeOfText(disassembler.DisassembleAt(bl, sizeof(bl), 0x1000, 0, false).tokens,
+                           "bl") == TokenType::MnemonicCall);
+        REQUIRE(typeOfText(disassembler.DisassembleAt(ret, sizeof(ret), 0x1000, 0, false).tokens,
+                           "ret") == TokenType::MnemonicRet);
+    }
+}
+
+TEST_CASE("an instruction reports the registers it reads and writes")
+{
+    {
+        Arm64Architecture architecture;
+        QCapstone disassembler(0, &architecture);
+        // ldr x0, [x1, #8] -- reads x1, writes x0.
+        const uint8_t code[] = {0x20, 0x04, 0x40, 0xf9};
+        const Instruction_t inst = disassembler.DisassembleAt(code, sizeof(code), 0x1000, 0, false);
+
+        bool readsX1 = false;
+        bool writesX0 = false;
+        for(const auto& reg : inst.regsReferenced)
+        {
+            if(QString(reg.first) == "x1" && (reg.second & 1) != 0)
+                readsX1 = true;
+            if(QString(reg.first) == "x0" && (reg.second & 2) != 0)
+                writesX0 = true;
+        }
+        INFO(inst.regsReferenced.size() << " registers referenced");
+        REQUIRE(readsX1);
+        REQUIRE(writesX0);
+    }
+    {
+        X86Architecture architecture;
+        QCapstone disassembler(0, &architecture);
+        // mov eax, dword ptr [rbx + rcx*4 + 0x10] -- reads rbx and rcx, writes eax.
+        const uint8_t code[] = {0x8b, 0x44, 0x8b, 0x10};
+        const Instruction_t inst = disassembler.DisassembleAt(code, sizeof(code), 0x1000, 0, false);
+
+        bool readsRbx = false;
+        bool writesEax = false;
+        for(const auto& reg : inst.regsReferenced)
+        {
+            if(QString(reg.first) == "rbx" && (reg.second & 1) != 0)
+                readsRbx = true;
+            if(QString(reg.first) == "eax" && (reg.second & 2) != 0)
+                writesEax = true;
+        }
+        REQUIRE(readsRbx);
+        REQUIRE(writesEax);
+    }
+}

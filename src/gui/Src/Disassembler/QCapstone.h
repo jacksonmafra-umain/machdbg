@@ -9,6 +9,7 @@
 // and ends at milestone 6 task 5, which retires Zydis and moves the shared struct; until then a
 // Capstone-based disassembler and a Zydis-based one have to agree about what an instruction is,
 // and the way to guarantee that is for both to use the same declaration rather than a copy.
+#include "CapstoneTokenizer.h"
 #include "QZydis.h"
 
 class Architecture;
@@ -70,12 +71,18 @@ private:
     // implementation.
     bool decodeOne(const uint8_t* data, duint size, duint address, cs_insn* insn) const;
 
+    // Fills Instruction_t::regsReferenced from cs_regs_access -- see the implementation for the
+    // measurement that says it can be.
+    void fillRegistersReferenced(const cs_insn& insn, Instruction_t& inst) const;
+
     Architecture* mArchitecture = nullptr;
     QHash<ENCODETYPE, DataInstructionInfo> mDataInstMap;
     bool mLongDataInst = false;
     bool mUseRunTrace = false;
     EncodeMap* mEncodeMap = nullptr;
     CodeFoldingHelper* mCodeFoldingManager = nullptr;
+
+    CapstoneTokenizer mTokenizer;
 
     csh mArm64Handle = 0;
     csh mX86Handle = 0;
