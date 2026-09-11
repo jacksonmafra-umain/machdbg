@@ -11,6 +11,9 @@
 #include <vector>
 
 #include "BreakpointTable.h"
+#include "MemoryMapTable.h"
+#include "ModuleTable.h"
+#include "ThreadTable.h"
 
 class Architecture;
 class EngineMemoryPage;
@@ -57,6 +60,12 @@ public:
     // anything else is a check that passes for the wrong reason.
     bool breakpointSelfTest(QStringList* report);
 
+    // Waits for the target's first stop, resumes it briefly, and stops it again -- which
+    // --selftest needs before it can assert anything about modules: at the first stop dyld has
+    // published no image list, so the module table is legitimately empty and every memory
+    // region reports no module. Drives the event loop itself, like breakpointSelfTest().
+    bool letTheTargetRun();
+
     // Launches with the target's stdout captured to a temporary file, so the address a fixture
     // publishes can be read back. Only breakpointSelfTest() needs this; an ordinary launch
     // leaves the target's output where the user can see it.
@@ -90,6 +99,12 @@ private:
     void refreshRegisters();
     void refreshMemory();
     void refreshBreakpoints();
+
+    // Modules, regions and threads, all three from the vtable at every stop. Separate from the
+    // register refresh because they answer at different moments: at the target's first stop
+    // dyld has published no images, so the module list and every region's module are empty
+    // there and fill in at the next one.
+    void refreshInventory();
     void stopEngine();
     // One place that creates the engine and starts its loop, for launch and attach alike:
     // `attachPid` of 0 means launch `path`. Two copies of this block drifted apart the moment
@@ -102,6 +117,9 @@ private:
 
     RegisterTable* mRegisters = nullptr;
     BreakpointTable* mBreakpointList = nullptr;
+    ModuleTable* mModules = nullptr;
+    MemoryMapTable* mMemoryMap = nullptr;
+    ThreadTable* mThreads = nullptr;
     QLineEdit* mBreakpointAddress = nullptr;
     QComboBox* mBreakpointKind = nullptr;
     QSpinBox* mBreakpointSize = nullptr;

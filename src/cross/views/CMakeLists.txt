@@ -50,8 +50,14 @@ set(machdbg_views_SOURCES
 	BreakpointTable.h
 	EngineMemoryPage.cpp
 	EngineMemoryPage.h
+	MemoryMapTable.cpp
+	MemoryMapTable.h
+	ModuleTable.cpp
+	ModuleTable.h
 	RegisterTable.cpp
 	RegisterTable.h
+	ThreadTable.cpp
+	ThreadTable.h
 	cmake.toml
 )
 

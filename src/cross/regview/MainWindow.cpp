@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <functional>
+#include <vector>
 #include <thread>
 
 #include <QApplication>
@@ -13,6 +14,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTabWidget>
 #include <QTemporaryFile>
 #include <QThread>
 #include <QVBoxLayout>
@@ -30,6 +32,9 @@
 #include <unistd.h>
 
 #include "BreakpointTable.h"
+#include "MemoryMapTable.h"
+#include "ModuleTable.h"
+#include "ThreadTable.h"
 #include "EngineMemoryPage.h"
 #include "RegisterTable.h"
 
@@ -159,10 +164,23 @@ MainWindow::MainWindow(QWidget* parent)
     benchLayout->addLayout(controls);
     benchLayout->addWidget(mBreakpointList, 1);
 
+    mModules = new ModuleTable(this);
+    mMemoryMap = new MemoryMapTable(this);
+    mThreads = new ThreadTable(this);
+
+    // Tabbed, not tiled: four tables and a hex dump do not fit side by side, and milestone 3's
+    // registers and memory keep the room they were given.
+    auto* inventory = new QTabWidget(this);
+    inventory->setAccessibleName(tr("Inventory"));
+    inventory->addTab(bench, tr("Breakpoints"));
+    inventory->addTab(mModules, tr("Modules"));
+    inventory->addTab(mMemoryMap, tr("Memory map"));
+    inventory->addTab(mThreads, tr("Threads"));
+
     auto* vertical = new QSplitter(Qt::Vertical, this);
     vertical->addWidget(splitter);
-    vertical->addWidget(bench);
-    mBreakpointList->setMinimumHeight(120);
+    vertical->addWidget(inventory);
+    inventory->setMinimumHeight(160);
     vertical->setSizes({420, 200});
     vertical->setStretchFactor(0, 1);
     setCentralWidget(vertical);
@@ -349,7 +367,95 @@ bool MainWindow::selfTest(QStringList* report) const
             .arg(memoryReadable ? QStringLiteral("yes") : QStringLiteral("no")));
     }
 
-    return pcPopulated && spPopulated && memoryReadable;
+    // The three tables milestone 5 added. Checked for content rather than for rows: a module
+    // list with forty-five empty rows renders exactly like a populated one, and only the values
+    // tell them apart.
+    //
+    // The target has to have run first. At its very first stop dyld has published no image
+    // list, so the module table is legitimately empty there and every region reports no module
+    // -- which is why this is checked here, from a self-test that resumes the target, rather
+    // than asserted at the first stop where it would be a lie about the engine.
+    const QStringList moduleRows = mModules->rows();
+    const QStringList mapRows = mMemoryMap->rows();
+    const QStringList threadRows = mThreads->rows();
+
+    bool aModuleHasASlide = false;
+    for(const QString& row : moduleRows)
+    {
+        // "<name> <base> <slide> <path>", and a slide of 0x0 everywhere is what a list built
+        // from a stub that forgot to subtract looks like.
+        const QStringList parts = row.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        if(parts.size() >= 3 && parts.at(2) != QStringLiteral("0x0"))
+            aModuleHasASlide = true;
+    }
+
+    bool aRegionNamesAModule = false;
+    for(const QString& row : mapRows)
+    {
+        if(row.split(QLatin1Char(' '), Qt::SkipEmptyParts).size() >= 5)
+            aRegionNamesAModule = true;   // the module column is the fifth and is blank when empty
+    }
+
+    bool aThreadHasAProgramCounter = false;
+    for(const QString& row : threadRows)
+    {
+        const QStringList parts = row.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+        for(const QString& part : parts)
+        {
+            if(part.startsWith(QStringLiteral("0x")) && part != QStringLiteral("0x0"))
+                aThreadHasAProgramCounter = true;
+        }
+    }
+
+    if(report)
+    {
+        report->append(QStringLiteral("modules %1 row(s), a slide that is not zero: %2")
+            .arg(moduleRows.size())
+            .arg(aModuleHasASlide ? QStringLiteral("yes") : QStringLiteral("no")));
+        report->append(QStringLiteral("memory map %1 row(s), a region naming a module: %2")
+            .arg(mapRows.size())
+            .arg(aRegionNamesAModule ? QStringLiteral("yes") : QStringLiteral("no")));
+        report->append(QStringLiteral("threads %1 row(s), a readable program counter: %2")
+            .arg(threadRows.size())
+            .arg(aThreadHasAProgramCounter ? QStringLiteral("yes") : QStringLiteral("no")));
+        for(const QString& row : threadRows)
+            report->append(QStringLiteral("  thread row: ") + row);
+    }
+
+    return pcPopulated && spPopulated && memoryReadable &&
+           aModuleHasASlide && aRegionNamesAModule && aThreadHasAProgramCounter;
+}
+
+bool MainWindow::letTheTargetRun()
+{
+    if(!mEngine)
+        return false;
+
+    const auto waitFor = [](const std::function<bool()>& done) {
+        for(int attempt = 0; attempt < 100 && !done(); ++attempt)
+        {
+            QApplication::processEvents();
+            if(!done())
+                QThread::msleep(50);
+        }
+        return done();
+    };
+
+    // The first stop, which is where a launch leaves the target: the register table having rows
+    // is how this window knows it happened.
+    if(!waitFor([this] { return mRegisters->getRowCount() > 0; }))
+        return false;
+
+    onContinue();
+    QApplication::processEvents();
+    QThread::msleep(250);
+    onPause();
+    QApplication::processEvents();
+
+    // Pausing runs the same refresh a stop does, so the module table having rows is this
+    // window's evidence that the target both ran and came back -- and it is the exact thing
+    // the caller is about to assert on, read here rather than assumed.
+    return !mModules->rows().isEmpty();
 }
 
 bool MainWindow::breakpointSelfTest(QStringList* report)
@@ -492,6 +598,7 @@ void MainWindow::onStopped()
     refreshRegisters();
     refreshMemory();
     refreshBreakpoints();
+    refreshInventory();
     // Not overwritten when a breakpoint stop has already said something more specific: "Stopped"
     // on top of "Stopped on a hardware write watchpoint" would throw away the only part of the
     // message the user could not have worked out for themselves.
@@ -610,6 +717,67 @@ void MainWindow::onToggleBreakpoint(const uint64_t address)
         break;
     }
     refreshBreakpoints();
+}
+
+void MainWindow::refreshInventory()
+{
+    if(!mEngine)
+        return;
+
+    // Each of these grows until the engine stops filling the buffer. Getting `capacity` back
+    // means "there may be more", which the contract says outright -- and a map that stopped at
+    // the first guess showed exactly 1024 regions of a process that has more, a number that
+    // looks like a fact and is really the size of an array.
+    constexpr uint32_t kMostRowsWorthAsking = 1u << 16;
+
+    std::vector<DbgModule> modules;
+    for(uint32_t capacity = 256; capacity <= kMostRowsWorthAsking; capacity *= 2)
+    {
+        modules.assign(capacity, DbgModule{});
+        uint32_t count = 0;
+        if(mEngine->ModEnum(mEngine->impl, modules.data(), capacity, &count) != DbgStatus_Ok)
+        {
+            modules.clear();
+            break;
+        }
+        modules.resize(count);
+        if(count < capacity)
+            break;
+    }
+    mModules->setModules(modules);
+
+    std::vector<DbgMemoryRegion> regions;
+    for(uint32_t capacity = 1024; capacity <= kMostRowsWorthAsking; capacity *= 2)
+    {
+        regions.assign(capacity, DbgMemoryRegion{});
+        uint32_t count = 0;
+        if(mEngine->MemEnumRegions(mEngine->impl, regions.data(), capacity, &count) !=
+           DbgStatus_Ok)
+        {
+            regions.clear();
+            break;
+        }
+        regions.resize(count);
+        if(count < capacity)
+            break;
+    }
+    mMemoryMap->setRegions(regions, modules);
+
+    std::vector<DbgThread> threads;
+    for(uint32_t capacity = 64; capacity <= kMostRowsWorthAsking; capacity *= 2)
+    {
+        threads.assign(capacity, DbgThread{});
+        uint32_t count = 0;
+        if(mEngine->ThreadEnum(mEngine->impl, threads.data(), capacity, &count) != DbgStatus_Ok)
+        {
+            threads.clear();
+            break;
+        }
+        threads.resize(count);
+        if(count < capacity)
+            break;
+    }
+    mThreads->setThreads(threads);
 }
 
 void MainWindow::refreshBreakpoints()

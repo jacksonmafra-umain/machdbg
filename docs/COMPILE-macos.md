@@ -140,6 +140,30 @@ A passing run prints every register row, the memory panel's base and size, and
 the *values*: a table of 34 rows of zeroes is what a view that renders but is never fed looks
 like, and a row count alone would accept it.
 
+### Modules, the memory map and threads
+
+Milestone 5 adds three more tables, in a tabbed panel beside the breakpoint bench: the modules
+dyld has loaded (with each one's ASLR slide, which is what turns a link-time address into a
+runtime one), the memory map (every region's protections, its tag as a readable name, and the
+module it belongs to), and the threads (id, name, state, program counter, and which one the
+current stop is on).
+
+Two things about those tables are properties of the platform rather than of the app, and are
+worth knowing before they look like bugs:
+
+- **At the target's first stop the module table is empty** and every memory region reports no
+  module. That stop is dyld's own notification trap, before it has published anything. The
+  tables fill in at the next stop, which is why `--selftest` resumes the target once before
+  asserting anything.
+- **The state column is the kernel's, and it does not mean "stopped".** A thread parked in an
+  unanswered exception reply reads as `waiting`, and so does every thread of a target that
+  Pause suspended. The separate "Stopped" column is the engine's own answer, which is the only
+  one that means what it says.
+
+`--selftest` now checks all five views, not just two: it fails unless a module reports a
+non-zero slide, a memory region names the module it belongs to, and a thread reports a readable
+program counter.
+
 ### The breakpoint bench
 
 Since milestone 4, `regview` also carries a breakpoint list: an address, a kind (software,
