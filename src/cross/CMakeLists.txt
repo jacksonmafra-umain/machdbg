@@ -114,6 +114,18 @@ if((CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND MACHBUG_BUILD_TESTS) # machbug-test
 	set(CMAKE_FOLDER ${CMKR_CMAKE_FOLDER})
 
 endif()
+if((CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND MACHBUG_BUILD_TESTS) # machbug-tests
+	# Subdirectory: tests/disasm
+	set(CMKR_CMAKE_FOLDER ${CMAKE_FOLDER})
+	if(CMAKE_FOLDER)
+		set(CMAKE_FOLDER "${CMAKE_FOLDER}/tests/disasm")
+	else()
+		set(CMAKE_FOLDER "tests/disasm")
+	endif()
+	add_subdirectory("tests/disasm")
+	set(CMAKE_FOLDER ${CMKR_CMAKE_FOLDER})
+
+endif()
 # Target: minidump
 set(minidump_SOURCES
 	cmake.toml

@@ -12,6 +12,27 @@ add_subdirectory(
 
 include(Qt.cmake)
 
+# Capstone comes from Homebrew (milestone 6, decision 1), so it is found rather than built.
+#
+# The include directory is NOT the one pkg-config reports. `pkg-config --cflags capstone`
+# answers `<prefix>/include/capstone`, under which `#include <capstone/capstone.h>` -- the
+# include every Capstone example uses -- does not resolve. The header lives at
+# `<prefix>/include/capstone/capstone.h`, so the root to add is `<prefix>/include`. Measured by
+# trying it: a build that passes the reported flags through fails at the first header.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(CAPSTONE REQUIRED IMPORTED_TARGET capstone)
+
+set(CAPSTONE_INCLUDE_ROOTS "")
+foreach(capstone_include ${CAPSTONE_INCLUDE_DIRS})
+    get_filename_component(capstone_include_name "${capstone_include}" NAME)
+    if(capstone_include_name STREQUAL "capstone")
+        get_filename_component(capstone_include_parent "${capstone_include}" DIRECTORY)
+        list(APPEND CAPSTONE_INCLUDE_ROOTS "${capstone_include_parent}")
+    endif()
+    list(APPEND CAPSTONE_INCLUDE_ROOTS "${capstone_include}")
+endforeach()
+list(REMOVE_DUPLICATES CAPSTONE_INCLUDE_ROOTS)
+
 set(hook_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Bridge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Bridge.h
@@ -142,7 +163,10 @@ target_link_libraries(x64dbg_widgets PUBLIC
     ${QT_LIBRARIES}
     zydis_wrapper
     md4c-html
+    PkgConfig::CAPSTONE
 )
+
+target_include_directories(x64dbg_widgets PUBLIC ${CAPSTONE_INCLUDE_ROOTS})
 
 # https://doc.qt.io/qt-6/wasm.html#asyncify
 if(EMSCRIPTEN)

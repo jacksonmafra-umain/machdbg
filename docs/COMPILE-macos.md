@@ -8,7 +8,7 @@
 | CMake | 3.19 | `brew install cmake` |
 | Ninja | 1.10 | `brew install ninja` |
 | cmkr | current | [GitHub release](https://github.com/build-cpp/cmkr/releases) (`cmkr-macos.zip`); not packaged by Homebrew |
-| Capstone | 5 | `brew install capstone` |
+| Capstone | 5 | `brew install capstone` — linked by the build as of milestone 6, not merely checked for |
 | Qt | 6 | Official Qt online installer |
 
 Qt does not come from Homebrew. Homebrew builds Qt for one architecture, and machdbg ships a
