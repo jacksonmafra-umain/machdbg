@@ -189,9 +189,22 @@ TEST_CASE("every vtable entry is callable and answers honestly about itself")
     REQUIRE(vtStatus(engine->MemEnumRegions(engine->impl, nullptr, 0, &count)) == DbgStatus_NotAttached);
     REQUIRE(count == 0);
 
-    REQUIRE(vtStatus(engine->ModBaseFromAddr(engine->impl, 0, &dummy)) == DbgStatus_NotSupported);
+    // NotAttached rather than NotSupported since milestone 5 task 6: these are implemented,
+    // and with that the vtable has no NotSupported entry left at all. What is missing here is a
+    // target.
+    REQUIRE(vtStatus(engine->ModBaseFromAddr(engine->impl, 0, &dummy)) == DbgStatus_NotAttached);
     char buf[8];
-    REQUIRE(vtStatus(engine->ModNameFromAddr(engine->impl, 0, buf, sizeof(buf))) == DbgStatus_NotSupported);
+    REQUIRE(vtStatus(engine->ModNameFromAddr(engine->impl, 0, buf, sizeof(buf))) == DbgStatus_NotAttached);
+    uint32_t moduleCount = 123;
+    DbgModule module{};
+    REQUIRE(vtStatus(engine->ModEnum(engine->impl, &module, 1, &moduleCount)) ==
+            DbgStatus_NotAttached);
+    REQUIRE(moduleCount == 0);
+    uint32_t threadCount = 123;
+    DbgThread thread{};
+    REQUIRE(vtStatus(engine->ThreadEnum(engine->impl, &thread, 1, &threadCount)) ==
+            DbgStatus_NotAttached);
+    REQUIRE(threadCount == 0);
 
     // NotAttached rather than NotSupported since milestone 4 task 7: these are implemented now,
     // and what is missing is a target rather than the feature.
@@ -1082,6 +1095,146 @@ TEST_CASE("the vtable enumerates threads with names, states and program counters
     REQUIRE(everyStateNamed);
     REQUIRE(everyPcReadable);
     REQUIRE(names.size() == 2);
+
+    MachBugDestroy(engine);
+}
+
+namespace
+{
+    std::mutex gLoadedPathMutex;
+    std::vector<std::string> gLoadedPaths;
+
+    void onModuleLoaded(uint64_t /*base*/, const char* path, void* /*userdata*/)
+    {
+        std::lock_guard<std::mutex> lock(gLoadedPathMutex);
+        gLoadedPaths.emplace_back(path ? path : "");
+    }
+}
+
+TEST_CASE("the vtable enumerates modules and names the one an address belongs to")
+{
+    {
+        std::lock_guard<std::mutex> lock(gLoadedPathMutex);
+        gLoadedPaths.clear();
+    }
+
+    BreakpointHarness harness;
+    DbgEngineCallbacks callbacks{};
+    callbacks.onSystemBreakpoint = onBreakpointHarnessSystemBreakpoint;
+    callbacks.onLoadModule = onModuleLoaded;
+    callbacks.userdata = &harness;
+
+    DbgEngine* engine = MachBugCreate(&callbacks);
+    REQUIRE(engine != nullptr);
+
+    const std::string path = FIXTURE("loads_a_library");
+    DbgLaunchSpec spec{};
+    spec.path = path.c_str();
+
+    std::thread startThread([&] {
+        engine->Start(engine->impl, &spec);
+        harness.startReturned.store(true, std::memory_order_release);
+    });
+
+    for(int i = 0; i < 500 && !harness.stopped.load(std::memory_order_acquire) &&
+                   !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const bool stopped = harness.stopped.load(std::memory_order_acquire);
+
+    // Empty at the first stop, because dyld has published nothing there. Documented on ModEnum
+    // and asserted here so the documentation cannot quietly stop being true.
+    DbgModule atFirstStop[8]{};
+    uint32_t firstCount = 123;
+    const DbgStatus firstResult = engine->ModEnum(engine->impl, atFirstStop, 8, &firstCount);
+
+    engine->Continue(engine->impl);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    engine->Pause(engine->impl);
+
+    std::vector<DbgModule> modules(256);
+    uint32_t count = 0;
+    const DbgStatus enumResult = engine->ModEnum(engine->impl, modules.data(),
+                                                  static_cast<uint32_t>(modules.size()), &count);
+
+    const DbgModule* main = nullptr;
+    for(uint32_t i = 0; i < count; ++i)
+    {
+        if(path == modules[i].path)
+            main = &modules[i];
+    }
+
+    uint64_t base = 0;
+    DbgStatus baseResult = DbgStatus_Failed;
+    char name[256]{};
+    DbgStatus nameResult = DbgStatus_Failed;
+    if(main != nullptr)
+    {
+        baseResult = engine->ModBaseFromAddr(engine->impl, main->base + 4, &base);
+        nameResult = engine->ModNameFromAddr(engine->impl, main->base + 4, name, sizeof(name));
+    }
+
+    // An address in no module: page one, which nothing maps.
+    uint64_t strayBase = 12345;
+    const DbgStatus strayResult = engine->ModBaseFromAddr(engine->impl, 0x1000, &strayBase);
+    const std::string strayDiagnostic = DbgLastErrorString();
+
+    // Now let the fixture reach its dlopen.
+    engine->Continue(engine->impl);
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    engine->Pause(engine->impl);
+    std::vector<std::string> loaded;
+    {
+        std::lock_guard<std::mutex> lock(gLoadedPathMutex);
+        loaded = gLoadedPaths;
+    }
+
+    engine->Stop(engine->impl);
+    for(int i = 0; i < 500 && !harness.startReturned.load(std::memory_order_acquire); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    if(harness.startReturned.load(std::memory_order_acquire))
+        startThread.join();
+    else
+        startThread.detach();
+
+    REQUIRE(stopped);
+    REQUIRE(firstResult == DbgStatus_Ok);
+    REQUIRE(firstCount == 0);
+
+    REQUIRE(enumResult == DbgStatus_Ok);
+    INFO(count << " modules");
+    REQUIRE(count > 10);
+    REQUIRE(main != nullptr);
+    INFO("the fixture is at 0x" << std::hex << main->base << " with slide 0x" << main->slide);
+    REQUIRE(main->size > 0);
+    REQUIRE(main->slide != 0);
+    REQUIRE(main->hasUuid);
+
+    REQUIRE(baseResult == DbgStatus_Ok);
+    REQUIRE(base == main->base);
+    REQUIRE(nameResult == DbgStatus_Ok);
+    // The last component, not the whole path: a module list is a column of names, not of
+    // identical directory prefixes.
+    REQUIRE(std::string(name) == "loads_a_library");
+
+    // Refused, and refused by name -- not answered with the nearest module below it.
+    INFO("stray diagnostic: " << strayDiagnostic);
+    REQUIRE(strayResult == DbgStatus_InvalidArgument);
+    REQUIRE(strayBase == 0);
+    REQUIRE(strayDiagnostic.find("no module") != std::string::npos);
+
+    // One dlopen is not one load event: libcurl drags its whole dependency chain in with it,
+    // and this run reported three hundred of them. What matters is that the library the
+    // fixture asked for is among them, not which one arrived last.
+    bool sawTheLibrary = false;
+    for(const std::string& loadedPath : loaded)
+    {
+        if(loadedPath.find("libcurl") != std::string::npos)
+            sawTheLibrary = true;
+    }
+    INFO("load events: " << loaded.size() << ", last was "
+         << (loaded.empty() ? std::string("(none)") : loaded.back()));
+    REQUIRE(loaded.size() >= 1);
+    REQUIRE(sawTheLibrary);
 
     MachBugDestroy(engine);
 }
