@@ -423,6 +423,7 @@ set(MachBug_tests_SOURCES
 	cmake.toml
 	debugger_launch.cpp
 	exception_loop.cpp
+	macho_image.cpp
 	memory.cpp
 	mig_exception_server.cpp
 	register_format.cpp
