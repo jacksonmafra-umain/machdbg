@@ -1,7 +1,7 @@
 #pragma once
 
 #include "AbstractTableView.h"
-#include <Disassembler/QZydis.h>
+#include <Disassembler/QCapstone.h>
 #include <QTextLayout>
 #include <Disassembler/Architecture.h>
 
@@ -91,7 +91,7 @@ public:
     //misc
     void setCodeFoldingManager(CodeFoldingHelper* CodeFoldingManager);
     void unfold(duint rva);
-    bool hightlightToken(const ZydisTokenizer::SingleToken & token);
+    bool hightlightToken(const CapstoneTokenizer::SingleToken & token);
     bool isHighlightMode() const;
     bool followInstruction(duint rva);
 
@@ -263,11 +263,11 @@ protected:
     duint mRvaDisplayBase;
     bool mHighlightingMode;
     MemoryPage* mMemPage;
-    QZydis* mDisasm;
+    QCapstone* mDisasm;
     bool mShowMnemonicBrief;
     XREF_INFO mXrefInfo;
     CodeFoldingHelper* mCodeFoldingManager;
-    ZydisTokenizer::SingleToken mHighlightToken;
+    CapstoneTokenizer::SingleToken mHighlightToken;
     bool mPermanentHighlightingMode;
     bool mNoCurrentModuleText;
     bool mIsMain = false;

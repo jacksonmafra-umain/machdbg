@@ -23,15 +23,16 @@ survive only as Windows-only artifacts that nothing on macOS currently links. Ea
 | jansson | MIT | Present only as Windows `.lib` blobs and headers under `src/dbg/jansson`; nothing on macOS links it yet |
 | lz4 | BSD | Present only as Windows `.lib` blobs and headers under `src/dbg/lz4`; nothing on macOS links it yet |
 | yara | BSD-3-Clause | Not vendored. The only trace in the tree is an icon, `src/gui/icons/yara.png` |
-| Zydis | MIT | Vendored at `src/zydis_wrapper`, including the amalgamated `Zydis/Zydis.c` and `Zydis/Zydis.h` that `src/zydis_wrapper/CMakeLists.txt` compiles. Scheduled for removal at milestone 6, when the Capstone tokenizer replaces it |
+| Zydis | MIT | **Removed at milestone 6.** It was vendored at `src/zydis_wrapper`; Capstone replaced it, the directory is gone and no built binary contains a Zydis symbol. Still credited in `CREDITS.md`, because it was used |
 | DWARF parser | to be decided | Not present. Decision deferred to milestone 7 |
 
 Qt under LGPL in a macOS `.app` needs the usual relinking and attribution care.
 
 ## What no longer ships
 
-TitanEngine, GleeBug, XEDParse and Scylla were removed at milestone 0. Zydis is scheduled for
-removal at milestone 6, when the Capstone tokenizer replaces it. All five remain credited in `CREDITS.md`.
+TitanEngine, GleeBug, XEDParse and Scylla were removed at milestone 0, and Zydis at milestone 6
+when Capstone replaced it. All five remain credited in `CREDITS.md`: removing code is not the
+same as pretending it was never used.
 
 ## Adding a dependency
 

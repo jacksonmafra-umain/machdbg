@@ -2,7 +2,7 @@
 
 #include <QFrame>
 #include <Imports.h>
-#include <Disassembler/QZydis.h>
+#include <Disassembler/QCapstone.h>
 #include <BasicView/AbstractTableView.h>
 
 class CachedFontMetrics;
@@ -46,7 +46,7 @@ protected:
     QColor mCommentBackgroundColor;
     QColor mCommentAutoColor;
     QColor mCommentAutoBackgroundColor;
-    QZydis mDisasm;
+    QCapstone mDisasm;
     AbstractTableView* mParent = nullptr;
 
     std::vector<std::pair<RichTextPainter::List, bool>> mDisassemblyToken;

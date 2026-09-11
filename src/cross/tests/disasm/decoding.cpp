@@ -125,9 +125,9 @@ TEST_CASE("the backward walk terminates on undecodable bytes")
 
 namespace
 {
-    using TokenType = ZydisTokenizer::TokenType;
+    using TokenType = CapstoneTokenizer::TokenType;
 
-    bool hasType(const ZydisTokenizer::InstructionToken& tokens, const TokenType type)
+    bool hasType(const CapstoneTokenizer::InstructionToken& tokens, const TokenType type)
     {
         for(const auto& token : tokens.tokens)
         {
@@ -137,7 +137,7 @@ namespace
         return false;
     }
 
-    TokenType typeOfText(const ZydisTokenizer::InstructionToken& tokens, const QString& text)
+    TokenType typeOfText(const CapstoneTokenizer::InstructionToken& tokens, const QString& text)
     {
         for(const auto& token : tokens.tokens)
         {
@@ -147,7 +147,7 @@ namespace
         return TokenType::Last;
     }
 
-    duint valueOfType(const ZydisTokenizer::InstructionToken& tokens, const TokenType type)
+    duint valueOfType(const CapstoneTokenizer::InstructionToken& tokens, const TokenType type)
     {
         for(const auto& token : tokens.tokens)
         {
@@ -157,7 +157,7 @@ namespace
         return 0;
     }
 
-    QString render(const ZydisTokenizer::InstructionToken& tokens)
+    QString render(const CapstoneTokenizer::InstructionToken& tokens)
     {
         QString out;
         for(const auto& token : tokens.tokens)

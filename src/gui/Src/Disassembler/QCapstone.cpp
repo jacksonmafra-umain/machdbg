@@ -1,6 +1,9 @@
 #include "QCapstone.h"
 
+#include "Architecture.h"
+#include "Configuration.h"
 #include "CapstoneVersion.h"
+#include "RichTextPainter.h"
 #include "StringUtil.h"
 
 #include <algorithm>
@@ -234,19 +237,18 @@ void QCapstone::fillRegistersReferenced(const cs_insn& insn, Instruction_t& inst
     // implementation: bit 0 read, bit 1 write. Implicit/explicit is not distinguished here --
     // Capstone's access list does not separate them, and inventing the distinction would be
     // worse than omitting it.
-    constexpr uint8_t kRead = 1 << 0;
-    constexpr uint8_t kWrite = 1 << 1;
+    // The vocabulary lives in Instruction.h now, with the field it describes.
 
     inst.regsReferenced.reserve(static_cast<size_t>(readCount) + writtenCount);
     for(uint8_t i = 0; i < readCount; i++)
     {
         if(const char* const name = cs_reg_name(h, read[i]))
-            inst.regsReferenced.emplace_back(name, kRead);
+            inst.regsReferenced.emplace_back(name, RegisterAccessRead);
     }
     for(uint8_t i = 0; i < writtenCount; i++)
     {
         if(const char* const name = cs_reg_name(h, written[i]))
-            inst.regsReferenced.emplace_back(name, kWrite);
+            inst.regsReferenced.emplace_back(name, RegisterAccessWrite);
     }
 }
 
@@ -412,4 +414,45 @@ void QCapstone::UpdateDataInstructionMap()
     mDataInstMap.insert(enc_real10, {"real10", "real10", "long double"});
     mDataInstMap.insert(enc_ascii, {"ascii", "ascii", "char"});
     mDataInstMap.insert(enc_unicode, {"unicode", "unicode", "wchar_t"});
+}
+
+// Moved here from QZydis.cpp, unchanged, when that file was deleted: the disassembly view calls
+// it to render the opcode-bytes column and it never had anything to do with Zydis beyond living
+// in its file. The byte-group separators it inserts are the fields Capstone cannot fill, so on
+// this port it renders one unseparated string -- see Instruction.h.
+void formatOpcodeString(const Instruction_t & inst, RichTextPainter::List & list, std::vector<std::pair<size_t, bool>> & realBytes)
+{
+    RichTextPainter::CustomRichText_t curByte;
+    auto size = inst.dump.size();
+    assert(list.empty()); //List must be empty before use
+    curByte.underlineWidth = 1;
+    curByte.flags = RichTextPainter::FlagAll;
+    curByte.underline = false;
+    list.reserve(size + 5);
+    realBytes.reserve(size + 5);
+    for(int i = 0; i < size; i++)
+    {
+        curByte.text = ToByteString(inst.dump.at(i));
+        list.push_back(curByte);
+        realBytes.push_back({i, true});
+
+        auto addCh = [&](char ch)
+        {
+            curByte.text = QString(ch);
+            list.push_back(curByte);
+            realBytes.push_back({i, false});
+        };
+
+        if(inst.prefixSize && i + 1 == inst.prefixSize)
+            addCh(':');
+        else if(inst.opcodeSize && i + 1 == inst.prefixSize + inst.opcodeSize)
+            addCh(' ');
+        else if(inst.group1Size && i + 1 == inst.prefixSize + inst.opcodeSize + inst.group1Size)
+            addCh(' ');
+        else if(inst.group2Size && i + 1 == inst.prefixSize + inst.opcodeSize + inst.group1Size + inst.group2Size)
+            addCh(' ');
+        else if(inst.group3Size && i + 1 == inst.prefixSize + inst.opcodeSize + inst.group1Size + inst.group2Size + inst.group3Size)
+            addCh(' ');
+
+    }
 }

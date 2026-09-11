@@ -7,7 +7,11 @@
 
 #include "Bridge.h"
 #include "Types.h"
-#include <zydis_wrapper.h>
+#include <Disassembler/QCapstone.h>
+#include <CapstoneVersion.h>
+#include <Disassembler/CapstoneTokenizer.h>   // MAX_DISASM_BUFFER
+#include <capstone/arm64.h>
+#include <capstone/x86.h>
 
 struct InvalidMemoryProvider : MemoryProvider
 {
@@ -310,13 +314,54 @@ LOOPTYPE DbgGetLoopTypeAt(duint addr, int depth)
 
 duint DbgGetBranchDestination(duint addr)
 {
+    // Reimplemented on Capstone when Zydis was retired (milestone 6 task 5). The disassembly
+    // view no longer needs it -- QCapstone fills Instruction_t::branchDestination from the
+    // decode it already has -- but the sidebar and the jump-arrow drawing still ask, so it
+    // answers rather than returning zero and making every arrow disappear.
+    //
+    // The architecture is the host's, which is the same TODO the Zydis version carried: nothing
+    // here is told which target it is describing. It is right for a debugger running native
+    // code and wrong for anything else, and the only honest fix is plumbing the architecture
+    // through this interface -- a change to the bridge's own shape, not to this function.
     uint8_t data[MAX_DISASM_BUFFER];
     if(!DbgMemRead(addr, data, sizeof(data)))
         return 0;
-    Zydis zydis(sizeof(duint) == 8); // TODO: architecture plumbed per-caller
-    if(!zydis.Disassemble(addr, data))
+
+#if defined(__arm64__) || defined(__aarch64__)
+    static const cs_arch arch = static_cast<cs_arch>(MACHDBG_CS_ARCH_ARM64);
+    static const cs_mode mode = CS_MODE_LITTLE_ENDIAN;
+#else
+    static const cs_arch arch = CS_ARCH_X86;
+    static const cs_mode mode = CS_MODE_64;
+#endif
+
+    csh handle = 0;
+    if(cs_open(arch, mode, &handle) != CS_ERR_OK)
         return 0;
-    return zydis.BranchDestination();
+    cs_option(handle, CS_OPT_DETAIL, CS_OPT_ON);
+
+    duint destination = 0;
+    cs_insn* insn = nullptr;
+    if(cs_disasm(handle, data, sizeof(data), addr, 1, &insn) == 1 && insn->detail != nullptr)
+    {
+        // The operand type, not CS_GRP_BRANCH_RELATIVE: that group is reported for indirect
+        // branches too (measured in milestone 6 task 4), so it does not mean the destination is
+        // knowable. An immediate operand is an address; a register operand is a value this code
+        // cannot resolve without running the target.
+#if defined(__arm64__) || defined(__aarch64__)
+        const cs_arm64& detail = insn->detail->arm64;
+        if(detail.op_count > 0 && detail.operands[0].type == ARM64_OP_IMM)
+            destination = static_cast<duint>(detail.operands[0].imm);
+#else
+        const cs_x86& detail = insn->detail->x86;
+        if(detail.op_count > 0 && detail.operands[0].type == X86_OP_IMM)
+            destination = static_cast<duint>(detail.operands[0].imm);
+#endif
+        cs_free(insn, 1);
+    }
+
+    cs_close(&handle);
+    return destination;
 }
 
 bool DbgIsJumpGoingToExecute(duint addr)

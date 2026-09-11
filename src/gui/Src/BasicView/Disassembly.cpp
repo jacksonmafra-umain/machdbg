@@ -4,7 +4,7 @@
 #include <Utils/EncodeMap.h>
 #include "Bridge.h"
 #include <Utils/CachedFontMetrics.h>
-#include <Disassembler/QZydis.h>
+#include <Disassembler/QCapstone.h>
 #include <Memory/MemoryPage.h>
 #include <Gui/DisassemblyPopup.h>
 
@@ -27,7 +27,7 @@ Disassembly::Disassembly(Architecture* architecture, bool isMain, QWidget* paren
     int maxModuleSize = (int)ConfigUint("Disassembler", "MaxModuleSize");
     Config()->writeUints();
 
-    mDisasm = new QZydis(maxModuleSize, mArchitecture);
+    mDisasm = new QCapstone(maxModuleSize, mArchitecture);
     mDisassemblyPopup = new DisassemblyPopup(this, mArchitecture);
 
     tokenizerConfigUpdatedSlot();
@@ -141,7 +141,7 @@ void Disassembly::updateColors()
     mConditionalTruePen = QPen(mConditionalJumpLineTrueColor);
     mConditionalFalsePen = QPen(mConditionalJumpLineFalseColor);
 
-    ZydisTokenizer::UpdateColors();
+    CapstoneTokenizer::UpdateColors();
     mDisasm->UpdateConfig();
 }
 
@@ -175,9 +175,9 @@ static void mnemonicBriefRichText(RichTextPainter::List & richText, const Instru
 
     char brief[MAX_STRING_SIZE] = "";
     QString mnem;
-    for(const ZydisTokenizer::SingleToken & token : instr.tokens.tokens)
+    for(const CapstoneTokenizer::SingleToken & token : instr.tokens.tokens)
     {
-        if(token.type != ZydisTokenizer::TokenType::Space && token.type != ZydisTokenizer::TokenType::Prefix)
+        if(token.type != CapstoneTokenizer::TokenType::Space && token.type != CapstoneTokenizer::TokenType::Prefix)
         {
             mnem = token.text;
             break;
@@ -578,9 +578,9 @@ QString Disassembly::paintContent(QPainter* painter, duint row, duint col, int x
         RichTextPainter::List richText;
         auto & token = mInstBuffer[rowOffset].tokens;
         if(mHighlightToken.text.length())
-            ZydisTokenizer::TokenToRichText(token, richText, &mHighlightToken);
+            CapstoneTokenizer::TokenToRichText(token, richText, &mHighlightToken);
         else
-            ZydisTokenizer::TokenToRichText(token, richText, 0);
+            CapstoneTokenizer::TokenToRichText(token, richText, 0);
         int xinc = 4 + loopsize;
         paintRichText(x, y, w, h, xinc, std::move(richText), rowOffset, col);
         token.x = x + loopsize + xinc;
@@ -757,9 +757,9 @@ duint Disassembly::getAddressForPosition(int mousex, int mousey)
     auto rowOffset = getIndexOffsetFromY(transY(mousey));
     if(rowOffset < mInstBuffer.size())
     {
-        ZydisTokenizer::SingleToken token;
+        CapstoneTokenizer::SingleToken token;
         auto & instruction = mInstBuffer.at(rowOffset);
-        if(ZydisTokenizer::TokenFromX(instruction.tokens, token, mousex, mFontMetrics))
+        if(CapstoneTokenizer::TokenFromX(instruction.tokens, token, mousex, mFontMetrics))
         {
             duint addr = token.value.value;
             bool isCodePage = DbgFunctions()->MemIsCodePage(addr, true);
@@ -796,30 +796,30 @@ void Disassembly::mousePressEvent(QMouseEvent* event)
             auto rowOffset = getIndexOffsetFromY(transY(event->y()));
             if(rowOffset < mInstBuffer.size())
             {
-                ZydisTokenizer::SingleToken token;
-                if(ZydisTokenizer::TokenFromX(mInstBuffer.at(rowOffset).tokens, token, event->x(), mFontMetrics))
+                CapstoneTokenizer::SingleToken token;
+                if(CapstoneTokenizer::TokenFromX(mInstBuffer.at(rowOffset).tokens, token, event->x(), mFontMetrics))
                 {
-                    if(ZydisTokenizer::IsHighlightableToken(token))
+                    if(CapstoneTokenizer::IsHighlightableToken(token))
                     {
-                        if(!ZydisTokenizer::TokenEquals(&token, &mHighlightToken) || event->button() == Qt::RightButton)
+                        if(!CapstoneTokenizer::TokenEquals(&token, &mHighlightToken) || event->button() == Qt::RightButton)
                             mHighlightToken = token;
                         else
-                            mHighlightToken = ZydisTokenizer::SingleToken();
+                            mHighlightToken = CapstoneTokenizer::SingleToken();
                     }
                     else if(!mPermanentHighlightingMode)
                     {
-                        mHighlightToken = ZydisTokenizer::SingleToken();
+                        mHighlightToken = CapstoneTokenizer::SingleToken();
                     }
                 }
                 else if(!mPermanentHighlightingMode)
                 {
-                    mHighlightToken = ZydisTokenizer::SingleToken();
+                    mHighlightToken = CapstoneTokenizer::SingleToken();
                 }
             }
         }
         else if(!mPermanentHighlightingMode)
         {
-            mHighlightToken = ZydisTokenizer::SingleToken();
+            mHighlightToken = CapstoneTokenizer::SingleToken();
         }
         if(!mPermanentHighlightingMode)
             return;
@@ -2203,7 +2203,7 @@ void Disassembly::disassembleAtSlot(duint va, duint cip)
 void Disassembly::disassembleClear()
 {
     mHighlightingMode = false;
-    mHighlightToken = ZydisTokenizer::SingleToken();
+    mHighlightToken = CapstoneTokenizer::SingleToken();
     historyClear();
     mMemPage->setAttributes(0, 0);
     mDisasm->getEncodeMap()->setMemoryRegion(0);
@@ -2377,7 +2377,7 @@ void Disassembly::unfold(duint rva)
     }
 }
 
-bool Disassembly::hightlightToken(const ZydisTokenizer::SingleToken & token)
+bool Disassembly::hightlightToken(const CapstoneTokenizer::SingleToken & token)
 {
     mHighlightToken = token;
     mHighlightingMode = false;
