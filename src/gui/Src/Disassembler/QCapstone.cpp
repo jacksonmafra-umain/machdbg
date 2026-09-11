@@ -23,8 +23,8 @@ namespace
 
 QCapstone::QCapstone(int maxModuleSize, Architecture* architecture)
     : mArchitecture(architecture)
+    , mTokenizer(maxModuleSize, architecture)
 {
-    Q_UNUSED(maxModuleSize);
 
     // Both handles, once. CS_OPT_DETAIL is what the token stream is built from (spec section 7);
     // without it Capstone returns text and nothing a highlighter can classify.
@@ -97,6 +97,8 @@ Instruction_t QCapstone::DisassembleAt(const uint8_t* data, const duint size,
     {
         inst.length = static_cast<int>(mScratch->size);
         inst.instStr = QString("%1 %2").arg(mScratch->mnemonic, mScratch->op_str).trimmed();
+        mTokenizer.TokenizeInstruction(handle(), *mScratch, inst.tokens);
+        fillRegistersReferenced(*mScratch, inst);
     }
     else
     {
@@ -126,6 +128,49 @@ Instruction_t QCapstone::DisassembleAt(const uint8_t* data, const duint size,
     // Said here rather than left for someone to discover a field nobody fills.
 
     return inst;
+}
+
+void QCapstone::fillRegistersReferenced(const cs_insn& insn, Instruction_t& inst) const
+{
+    // MEASURED before this was written: cs_regs_access answers on BOTH architectures at this
+    // Capstone version, with the sets one would want --
+    //
+    //     ldr x0, [x1, #8]                       read [x1]      write [x0]
+    //     stp x29, x30, [sp, #-0x10]!            read [fp lr sp] write [sp]
+    //     mov eax, dword ptr [rbx + rcx*4 + 16]  read [rbx rcx]  write [eax]
+    //
+    // so there is no need for the fallback the plan allowed for (walking the operands and
+    // inferring). If a future version stops answering for one architecture, this returns an
+    // empty list rather than a wrong one.
+    const csh h = handle();
+    if(h == 0)
+        return;
+
+    cs_regs read = {};
+    cs_regs written = {};
+    uint8_t readCount = 0;
+    uint8_t writtenCount = 0;
+    if(cs_regs_access(h, &insn, read, &readCount, written, &writtenCount) != CS_ERR_OK)
+        return;
+
+    // The flag vocabulary is the one Instruction_t already carries from the Zydis
+    // implementation: bit 0 read, bit 1 write. Implicit/explicit is not distinguished here --
+    // Capstone's access list does not separate them, and inventing the distinction would be
+    // worse than omitting it.
+    constexpr uint8_t kRead = 1 << 0;
+    constexpr uint8_t kWrite = 1 << 1;
+
+    inst.regsReferenced.reserve(static_cast<size_t>(readCount) + writtenCount);
+    for(uint8_t i = 0; i < readCount; i++)
+    {
+        if(const char* const name = cs_reg_name(h, read[i]))
+            inst.regsReferenced.emplace_back(name, kRead);
+    }
+    for(uint8_t i = 0; i < writtenCount; i++)
+    {
+        if(const char* const name = cs_reg_name(h, written[i]))
+            inst.regsReferenced.emplace_back(name, kWrite);
+    }
 }
 
 Instruction_t QCapstone::DecodeDataAt(const uint8_t* data, const duint size, const duint origBase,
