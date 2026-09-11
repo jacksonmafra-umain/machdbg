@@ -426,6 +426,7 @@ set(MachBug_tests_SOURCES
 	macho_image.cpp
 	memory.cpp
 	mig_exception_server.cpp
+	modules.cpp
 	register_format.cpp
 	registers_arm64.cpp
 	registers_x86_64.cpp
