@@ -361,10 +361,13 @@ bool MainWindow::selfTest(QStringList* report) const
             .arg(mRegisters->getRowCount()).arg(mRegisters->getViewableRowsCount()));
         report->append(QStringLiteral("memory widget %1x%2, %3 viewable")
             .arg(mMemory->width()).arg(mMemory->height()).arg(mMemory->getViewableRowsCount()));
-        report->append(QStringLiteral("memory base 0x%1 size 0x%2 readable %3")
+        report->append(QStringLiteral("memory base 0x%1 size 0x%2 readable %3%4")
             .arg(mMemoryPage->getBase(), 0, 16)
             .arg(mMemoryPage->getSize(), 0, 16)
-            .arg(memoryReadable ? QStringLiteral("yes") : QStringLiteral("no")));
+            .arg(memoryReadable ? QStringLiteral("yes") : QStringLiteral("no"))
+            .arg(memoryReadable ? QString()
+                                : QStringLiteral(" -- %1")
+                                      .arg(QString::fromUtf8(DbgLastErrorString()))));
     }
 
     // The three tables milestone 5 added. Checked for content rather than for rows: a module
@@ -415,6 +418,23 @@ bool MainWindow::selfTest(QStringList* report) const
         report->append(QStringLiteral("memory map %1 row(s), a region naming a module: %2")
             .arg(mapRows.size())
             .arg(aRegionNamesAModule ? QStringLiteral("yes") : QStringLiteral("no")));
+        // Where the panel was pointed and what the map says about that base: a read that fails
+        // at a region's own base is either the wrong region or an unbacked one, and those two
+        // look identical without this line.
+        DbgRegisters probe{};
+        const bool stoppedThreadReadable =
+            mEngine->GetRegisters(mEngine->impl, 0, &probe) == DbgStatus_Ok;
+        QString regionRow = QStringLiteral("(no map row for that base)");
+        for(const QString& row : mapRows)
+        {
+            if(row.startsWith(QStringLiteral("0x%1 ").arg(mMemoryPage->getBase(), 0, 16)))
+                regionRow = row;
+        }
+        report->append(QStringLiteral("panel pc 0x%1, stopped-thread registers readable: %2")
+            .arg(mProgramCounter, 0, 16)
+            .arg(stoppedThreadReadable ? QStringLiteral("yes") : QStringLiteral("no")));
+        report->append(QStringLiteral("map row for the panel's base: %1").arg(regionRow));
+
         report->append(QStringLiteral("threads %1 row(s), a readable program counter: %2")
             .arg(threadRows.size())
             .arg(aThreadHasAProgramCounter ? QStringLiteral("yes") : QStringLiteral("no")));
@@ -595,10 +615,12 @@ void MainWindow::onAttach()
 
 void MainWindow::onStopped()
 {
+    // The inventory first: it is what finds a program counter the memory panel can use when
+    // there is no stopped thread to read one from.
+    refreshInventory();
     refreshRegisters();
     refreshMemory();
     refreshBreakpoints();
-    refreshInventory();
     // Not overwritten when a breakpoint stop has already said something more specific: "Stopped"
     // on top of "Stopped on a hardware write watchpoint" would throw away the only part of the
     // message the user could not have worked out for themselves.
@@ -778,6 +800,22 @@ void MainWindow::refreshInventory()
             break;
     }
     mThreads->setThreads(threads);
+
+    // A Pause suspends the task without stopping any thread at an exception, so threadId 0
+    // names nothing and the registers cannot be read through it. Each thread's own program
+    // counter can be, though -- ThreadEnum reads them per thread port -- so the panel follows
+    // the stopped thread when there is one and the first thread otherwise, rather than staying
+    // pointed at wherever the target's first stop happened to be. That address is inside dyld,
+    // and a memory panel showing dyld's entry trampoline for the rest of the session is a view
+    // that has quietly stopped tracking the target.
+    mProgramCounter = 0;
+    for(const DbgThread& thread : threads)
+    {
+        if(mProgramCounter == 0 || thread.isStoppedThread)
+            mProgramCounter = thread.pc;
+        if(thread.isStoppedThread)
+            break;
+    }
 }
 
 void MainWindow::refreshBreakpoints()
@@ -821,11 +859,14 @@ void MainWindow::refreshMemory()
         return;
 
     DbgRegisters regs{};
-    if(mEngine->GetRegisters(mEngine->impl, 0, &regs) != DbgStatus_Ok)
+    uint64_t pc = mProgramCounter;
+    if(mEngine->GetRegisters(mEngine->impl, 0, &regs) == DbgStatus_Ok)
+    {
+        const DbgArch arch = mEngine->GetArch(mEngine->impl);
+        pc = arch == DbgArch_Arm64 ? regs.arm64.pc : regs.x86_64.rip;
+    }
+    if(pc == 0)
         return;
-
-    const DbgArch arch = mEngine->GetArch(mEngine->impl);
-    const uint64_t pc = arch == DbgArch_Arm64 ? regs.arm64.pc : regs.x86_64.rip;
 
     // The mapping the program counter is in, so the dump shows something real and its scrollbar
     // has a range that means something -- rather than a window around an address that may sit

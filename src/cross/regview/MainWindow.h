@@ -105,6 +105,12 @@ private:
     // dyld has published no images, so the module list and every region's module are empty
     // there and fill in at the next one.
     void refreshInventory();
+
+    // The program counter to point the memory panel at: the stopped thread's when there is
+    // one, and otherwise the first thread's. A Pause has no stopped thread -- it is a
+    // task_suspend with no exception behind it -- so GetRegisters(threadId 0) fails there, and
+    // without a fallback the panel keeps whatever address the first stop left it at.
+    uint64_t mProgramCounter = 0;
     void stopEngine();
     // One place that creates the engine and starts its loop, for launch and attach alike:
     // `attachPid` of 0 means launch `path`. Two copies of this block drifted apart the moment
