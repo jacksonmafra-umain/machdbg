@@ -11,7 +11,17 @@ Do not bring your weak Windows PE binaries into my domain, nor mistake this for 
 
 ## Status
 
-Milestone 0 is complete: The upstream tree has been chained, stripped, and forced to configure under CMake, with the engine contract header bound in place. Milestone 1 now stirs: the cross-platform widget sample applications rise as proper `.app` bundles, Qt frameworks and all, and — proven below, not merely asserted — they open their eyes and walk upon Apple Silicon. No active debugging behavior creeps within these shadows yet—only the framework of their upcoming torment.
+Six milestones have been dragged into the light. The engine no longer merely configures — it seizes a living Mach-O process and holds it still.
+
+What obeys today, on arm64 and x86-64 alike:
+
+* **Possession.** Launch or attach, a Mach exception port of my own, stop and resume at will.
+* **Entrails.** General-purpose registers read and written on a stopped thread; memory read, written and enumerated, with page protection flipped and restored beneath the victim's notice.
+* **Chains.** Software breakpoints, hardware execution breakpoints, watchpoints on read and write, and single-step — the debug registers of both architectures bent to the same interface.
+* **Census.** The modules dyld has loaded with their slides, the memory map with every region's protection and tag, and the thread list with each program counter.
+* **Divination.** Disassembly through Capstone for both architectures, with a token stream built from structured operands rather than re-lexed text. Zydis has been cast out entirely.
+
+The x86-64 half is not taken on faith: every engine test runs on an Intel runner in CI, and reported `All tests passed (1140 assertions in 93 test cases)` there.
 
 * Seek the milestones and issues to glimpse my grand design.
 * Consult [docs/COMPILE-macos.md](docs/COMPILE-macos.md) to forge the binary yourself.
@@ -19,11 +29,15 @@ Milestone 0 is complete: The upstream tree has been chained, stripped, and force
 
 ### Proof of life
 
-Two of the widget samples, resurrected as native macOS bundles and caught mid-summoning:
+`regview` — the bench that proves the engine — holding a native arm64 process still and reading its soul. Registers and memory above, and below, in turn: the disassembly at the program counter, the modules dyld has published, and the memory map.
 
-<img src="docs/screenshots/hex_viewer.png" alt="hex_viewer running as a native macOS app" width="480"> <img src="docs/screenshots/minidump.png" alt="minidump running as a native macOS app" width="480">
+<img src="docs/screenshots/regview-disassembly.png" alt="regview showing registers, memory and the disassembly at the program counter" width="420"> <img src="docs/screenshots/regview-modules.png" alt="regview showing the module table with each module's base, size and ASLR slide" width="420">
 
-These are the cross-platform widget samples, running natively on macOS.
+<img src="docs/screenshots/regview-memory-map.png" alt="regview showing the memory map with each region's protection, tag and owning module" width="420"> <img src="docs/screenshots/regview-threads.png" alt="regview showing the thread list with each thread's state and program counter" width="420">
+
+The cross-platform widget samples, resurrected as native macOS bundles, still walk as they did when milestone 1 raised them:
+
+<img src="docs/screenshots/hex_viewer.png" alt="hex_viewer running as a native macOS app" width="420"> <img src="docs/screenshots/minidump.png" alt="minidump running as a native macOS app" width="420">
 
 ## Law & Decrees
 
