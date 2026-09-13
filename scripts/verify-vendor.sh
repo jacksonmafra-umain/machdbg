@@ -87,6 +87,7 @@ required=(
     src/cross/MachBug/MachBug/core/Modules.h
     src/cross/MachBug/MachBug/core/Modules.cpp
     src/cross/MachBug/tests/modules.cpp
+    src/cross/MachBug/tests/dwarf_available.cpp
     src/cross/MachBug/tests/targets/loads_a_library.cpp
     src/cross/MachBug/tests/targets/writes_a_global.cpp
     src/cross/views/cmake.toml

@@ -18,7 +18,7 @@ They wrote the x64dbg codebase this fork is built upon: mrexodia (Duncan Ogilvie
 
 TitanEngine Community Edition, Zydis, GleeBug, XEDParse, asmjit, Scylla, Jansson, lz4, the bug icon by VisualPharm, interface icons by Fugue, and the website by tr4ceflow.
 
-This port additionally builds on **Capstone** (BSD-3-Clause), which replaced Zydis as the disassembly engine at milestone 6.
+This port additionally builds on **Capstone** (BSD-3-Clause), which replaced Zydis as the disassembly engine at milestone 6, and on **libdwarf** (LGPL-2.1) by David Anderson, originally from Silicon Graphics, which reads DWARF out of `.dSYM` bundles as of milestone 7.
 
 Some of these relics no longer reside within machdbg. They remain credited because the dark logic forged around them still endures.
 

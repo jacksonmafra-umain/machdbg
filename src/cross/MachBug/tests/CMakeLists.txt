@@ -459,6 +459,7 @@ set(MachBug_tests_SOURCES
 	breakpoints_software.cpp
 	cmake.toml
 	debugger_launch.cpp
+	dwarf_available.cpp
 	exception_loop.cpp
 	macho_image.cpp
 	memory.cpp

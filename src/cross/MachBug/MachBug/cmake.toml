@@ -43,4 +43,12 @@ include-before = ["../cmake/MachBugMig.cmake"]
 # did) -- Debugger.Loop.cpp's command queue is a std::mutex/std::condition_variable, and Start()
 # is documented to run on a caller-owned thread, so this library links pthread explicitly rather
 # than relying on it coming in transitively from something else that happens to.
-link-libraries = ["machbug_mig", "Threads::Threads"]
+# PkgConfig::LIBDWARF: milestone 7 reads DWARF out of a .dSYM through libdwarf (LGPL-2.1-only,
+# used under that licence's section 3 -- see docs/licenses.md). Unlike capstone, whose reported
+# include directory has to be corrected, libdwarf's is used as reported: its Cflags name
+# <prefix>/include/libdwarf-2 and <libdwarf.h> resolves under it.
+link-libraries = ["machbug_mig", "Threads::Threads", "PkgConfig::LIBDWARF"]
+cmake-before = """
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBDWARF REQUIRED IMPORTED_TARGET libdwarf)
+"""

@@ -51,6 +51,18 @@ else
     printf 'ok capstone %s\n' "$capstone_version"
 fi
 
+# libdwarf's pkg-config is NOT the trap capstone's is: its Cflags name <prefix>/include/libdwarf-2,
+# under which #include <libdwarf.h> resolves. Measured, on 2.3.2, by compiling against it.
+if ! libdwarf_version="$(pkg-config --modversion libdwarf 2>/dev/null)" || [[ -z "$libdwarf_version" ]]; then
+    printf 'FAIL libdwarf — brew install libdwarf\n'
+    missing=1
+elif [[ "$(printf '%s\n%s\n' "2" "$libdwarf_version" | sort -V | head -1)" != "2" ]]; then
+    printf 'FAIL libdwarf — found %s, need 2 or newer; brew install libdwarf\n' "$libdwarf_version"
+    missing=1
+else
+    printf 'ok libdwarf %s\n' "$libdwarf_version"
+fi
+
 require_present codesign "install the Xcode command line tools: xcode-select --install"
 
 if [[ -z "${QT_ROOT_DIR:-}" ]]; then

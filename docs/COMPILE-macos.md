@@ -9,7 +9,12 @@
 | Ninja | 1.10 | `brew install ninja` |
 | cmkr | current | [GitHub release](https://github.com/build-cpp/cmkr/releases) (`cmkr-macos.zip`); not packaged by Homebrew |
 | Capstone | 5 | `brew install capstone` — linked by the build as of milestone 6, not merely checked for |
+| libdwarf | 2 | `brew install libdwarf` (the formula is named `dwarfutils`) — linked by the engine as of milestone 7, for reading DWARF out of `.dSYM` bundles |
 | Qt | 6 | Official Qt online installer |
+
+libdwarf is found through `pkg-config` too, and its flags are used as reported: its `.pc` names
+`<prefix>/include/libdwarf-2`, under which `#include <libdwarf.h>` resolves. Only the library is
+linked — `dwarfdump`, the GPL-2 half of that distribution, is not part of this build.
 
 Capstone is found through `pkg-config`. If configuring fails with
 `capstone/capstone.h: No such file or directory`, the cause is Capstone's own `.pc` file, which
