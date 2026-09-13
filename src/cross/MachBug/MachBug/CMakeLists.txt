@@ -27,6 +27,9 @@ project(MachBug
 set(CMKR_TARGET MachBug)
 include("../cmake/MachBugMig.cmake")
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBDWARF REQUIRED IMPORTED_TARGET libdwarf)
+
 set(MachBug_SOURCES
 	"api/machbug_api.cpp"
 	"api/machbug_api.h"
@@ -75,4 +78,5 @@ target_include_directories(MachBug PUBLIC
 target_link_libraries(MachBug PUBLIC
 	machbug_mig
 	Threads::Threads
+	PkgConfig::LIBDWARF
 )
