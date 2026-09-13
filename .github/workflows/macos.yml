@@ -14,7 +14,7 @@ jobs:
 
       - name: Install the toolchain
         run: |
-          brew install ninja qt capstone
+          brew install ninja qt capstone libdwarf
           # --retry, because this download is a single point of failure with no fallback:
           # it answered HTTP 500 once (run 34347238871) and failed a job whose own work was
           # already done. Retrying an asset fetch is safe -- it is a plain GET of an immutable
@@ -130,7 +130,7 @@ jobs:
       # adds the widgets subdirectory unconditionally, so configure itself needs it.
       - name: Install the toolchain
         run: |
-          brew install ninja qt capstone
+          brew install ninja qt capstone libdwarf
           # --retry, because this download is a single point of failure with no fallback:
           # it answered HTTP 500 once (run 34347238871) and failed a job whose own work was
           # already done. Retrying an asset fetch is safe -- it is a plain GET of an immutable
