@@ -24,7 +24,7 @@ survive only as Windows-only artifacts that nothing on macOS currently links. Ea
 | lz4 | BSD | Present only as Windows `.lib` blobs and headers under `src/dbg/lz4`; nothing on macOS links it yet |
 | yara | BSD-3-Clause | Not vendored. The only trace in the tree is an icon, `src/gui/icons/yara.png` |
 | Zydis | MIT | **Removed at milestone 6.** It was vendored at `src/zydis_wrapper`; Capstone replaced it, the directory is gone and no built binary contains a Zydis symbol. Still credited in `CREDITS.md`, because it was used |
-| DWARF parser | to be decided | Not present. Decision deferred to milestone 7 |
+| libdwarf | LGPL-2.1-only, used under its §3 | Linked by the engine as of milestone 7 (`brew install libdwarf`, Homebrew formula `dwarfutils`, verified by `scripts/check-toolchain.sh`). Its `COPYING` says "The source code in the libdwarf directory is LGPL version 2.1" and, separately, "The source code in the dwarfdump directory is generally GPL version 2". **Only the library is linked**; `dwarfdump` is neither linked nor shipped. §3 of the LGPLv2.1 permits taking a copy under "the GNU General Public License, version 2 or any later version", which is how a GPLv3 project uses it — and is exactly what Keystone, GPLv2-only, lacks |
 
 Qt under LGPL in a macOS `.app` needs the usual relinking and attribution care.
 
