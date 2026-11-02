@@ -1,10 +1,13 @@
-FROM ubuntu:20.04
+# Ubuntu 24.04 LTS: 20.04 left standard support in May 2025 and ships libbrotli 1.0.7,
+# which never received the CVE-2026-111497 fix. GCC 13 is in the 24.04 archive, so the
+# toolchain PPA is no longer needed; qt5-default was dropped after 20.04 (qtbase5-dev
+# provides the same tools) and libfuse2 became libfuse2t64 with the 64-bit time_t move.
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y software-properties-common && \
-    add-apt-repository ppa:ubuntu-toolchain-r/test && \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     gcc-13 g++-13 \
     make \
     ninja-build \
@@ -12,8 +15,7 @@ RUN apt-get update && apt-get install -y software-properties-common && \
     wget \
     file \
     fuse \
-    libfuse2 \
-    qt5-default \
+    libfuse2t64 \
     qtbase5-dev \
     qttools5-dev \
     qttools5-dev-tools \
